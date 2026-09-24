@@ -10,6 +10,22 @@ import {
   FileAttachment,
   CaseLocationItem,
   UserCurrentLocation,
+  Lead,
+  LeadStatus,
+  LeadPriority,
+  MissingInfoStatus,
+  MissingInfoItem,
+  CaseCompleteness,
+  PriorityReason,
+  CasePriorityDetails,
+  ChangeItem,
+  WhatChangedSummary,
+  ConflictItem,
+  AiNextActionSuggestion,
+  PotentialRelatedCase,
+  EvidenceAuditEntry,
+  CaseClosureChecklist,
+  PriorityLevel,
 } from '../../types/index.ts';
 
 // In-Memory Relational Data Store
@@ -21,6 +37,16 @@ class Database {
   private sightings: Map<string, Sighting> = new Map();
   private files: Map<string, FileAttachment> = new Map();
   private tasks: Map<string, InvestigationTask> = new Map();
+  private leads: Map<string, Lead> = new Map();
+  private priorityOverrides: Map<string, { priority: PriorityLevel; reason: string; overrideBy: string; overrideAt: string }> = new Map();
+  private missingInfoMap: Map<string, Map<string, MissingInfoStatus>> = new Map();
+  private userLogins: Map<string, { current: string; previous: string }> = new Map();
+  private conflicts: Map<string, ConflictItem[]> = new Map();
+  private aiNextActions: Map<string, AiNextActionSuggestion[]> = new Map();
+  private potentialRelatedCases: Map<string, PotentialRelatedCase[]> = new Map();
+  private evidenceAuditLogs: Map<string, EvidenceAuditEntry[]> = new Map();
+  private caseClosureChecklists: Map<string, CaseClosureChecklist> = new Map();
+  private staleCaseThresholdHours: number = 48;
   private userCurrentLocations: Map<string, UserCurrentLocation> = new Map();
   private timeline: TimelineEvent[] = [];
   private auditLogs: AuditLog[] = [];
@@ -207,6 +233,649 @@ class Database {
     const count = this.tasks.size + 1;
     const padded = String(count).padStart(6, '0');
     return `TSK-2026-${padded}`;
+  }
+
+  // ----------------------------------------------------
+  // LEADS MANAGEMENT
+  // ----------------------------------------------------
+  public getAllLeads(caseId?: string): Lead[] {
+    let list = Array.from(this.leads.values());
+    if (caseId) {
+      list = list.filter((l) => l.caseId === caseId);
+    }
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public getLeadById(id: string): Lead | undefined {
+    return this.leads.get(id);
+  }
+
+  public createLead(lead: Lead): Lead {
+    this.leads.set(lead.id, lead);
+    return lead;
+  }
+
+  public updateLead(id: string, updates: Partial<Lead>): Lead | undefined {
+    const existing = this.leads.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
+    this.leads.set(id, updated);
+    return updated;
+  }
+
+  public generateLeadId(): string {
+    const count = this.leads.size + 1;
+    const padded = String(count).padStart(6, '0');
+    return `LED-2026-${padded}`;
+  }
+
+  // ----------------------------------------------------
+  // CASE COMPLETENESS & MISSING INFO
+  // ----------------------------------------------------
+  public getCaseCompleteness(caseId: string): CaseCompleteness {
+    const c = this.cases.get(caseId);
+    if (!c) {
+      return {
+        personDetailsPercent: 0,
+        reportInfoPercent: 0,
+        locationDataPercent: 0,
+        verificationPercent: 0,
+        tasksPercent: 0,
+        overallPercent: 0,
+        missingItems: [],
+      };
+    }
+
+    const p = c.person;
+    let personScore = 0;
+    if (p.fullName) personScore += 20;
+    if (p.photoUrl && !p.photoUrl.includes('unsplash.com/photo-1544005313-94ddf0286df2')) personScore += 20;
+    if (p.physicalDescription) personScore += 20;
+    if (p.identifyingMarks && p.identifyingMarks !== 'None noted') personScore += 20;
+    if (p.clothingDescription && p.clothingDescription !== 'Unknown') personScore += 20;
+
+    const reports = this.getAllReports(caseId);
+    const reportScore = Math.min(100, reports.length * 25);
+
+    const locations = this.getCaseLocations(caseId);
+    const locationScore = Math.min(100, locations.length * 30);
+
+    const verifiedReports = reports.filter((r) => r.verificationStatus === 'Verified');
+    const verificationScore = reports.length > 0 ? Math.round((verifiedReports.length / reports.length) * 100) : 50;
+
+    const tasks = this.getAllTasks(caseId);
+    const completedTasks = tasks.filter((t) => t.status === 'Completed');
+    const tasksScore = tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 50;
+
+    const overall = Math.round(
+      personScore * 0.25 +
+        reportScore * 0.2 +
+        locationScore * 0.2 +
+        verificationScore * 0.2 +
+        tasksScore * 0.15
+    );
+
+    const caseMap = this.missingInfoMap.get(caseId) || new Map();
+    const defaultMissing: MissingInfoItem[] = [
+      {
+        id: 'photo',
+        category: 'Identity',
+        label: 'Recent High-Resolution Photograph',
+        status:
+          p.photoUrl && !p.photoUrl.includes('unsplash.com/photo-1544005313-94ddf0286df2')
+            ? 'Collected'
+            : 'Required',
+      },
+      {
+        id: 'marks',
+        category: 'Physical',
+        label: 'Distinctive Identifying Mark / Scar / Tattoo',
+        status: p.identifyingMarks && p.identifyingMarks !== 'None noted' ? 'Collected' : 'Required',
+      },
+      {
+        id: 'clothing',
+        category: 'Appearance',
+        label: 'Exact Clothing & Footwear Description',
+        status: p.clothingDescription && p.clothingDescription !== 'Unknown' ? 'Collected' : 'Required',
+      },
+      {
+        id: 'last_contact',
+        category: 'Timeline',
+        label: 'Exact Last Phone Contact / Digital Timestamp',
+        status: p.timeMissing !== 'Unknown' ? 'Collected' : 'Required',
+      },
+      {
+        id: 'witness_contact',
+        category: 'Witnesses',
+        label: 'Primary Witness Direct Phone Contact',
+        status: p.reportingPersonContact ? 'Collected' : 'Required',
+      },
+      {
+        id: 'medical_records',
+        category: 'Medical',
+        label: 'Medical & Prescription History',
+        status: p.medicalConditions ? 'Collected' : 'Optional',
+      },
+    ];
+
+    const missingItems = defaultMissing.map((item) => {
+      const storedStatus = caseMap.get(item.id);
+      return {
+        ...item,
+        status: storedStatus || item.status,
+      };
+    });
+
+    return {
+      personDetailsPercent: personScore,
+      reportInfoPercent: reportScore,
+      locationDataPercent: locationScore,
+      verificationPercent: verificationScore,
+      tasksPercent: tasksScore,
+      overallPercent: overall,
+      missingItems,
+    };
+  }
+
+  public updateMissingInfoStatus(
+    caseId: string,
+    itemId: string,
+    status: MissingInfoStatus,
+    notes?: string
+  ): CaseCompleteness {
+    if (!this.missingInfoMap.has(caseId)) {
+      this.missingInfoMap.set(caseId, new Map());
+    }
+    this.missingInfoMap.get(caseId)!.set(itemId, status);
+    return this.getCaseCompleteness(caseId);
+  }
+
+  // ----------------------------------------------------
+  // CASE PRIORITY SYSTEM & OVERRIDE
+  // ----------------------------------------------------
+  public getCasePriorityDetails(caseId: string): CasePriorityDetails {
+    const c = this.cases.get(caseId);
+    if (!c) {
+      return {
+        calculatedPriority: 'Medium',
+        currentPriority: 'Medium',
+        isManualOverride: false,
+        reasons: [],
+      };
+    }
+
+    const reasons: PriorityReason[] = [];
+    let score = 0;
+
+    // Vulnerability check
+    if (c.person.age < 12 || c.person.age > 65) {
+      reasons.push({
+        code: 'VULNERABLE_AGE',
+        label: `Subject age (${c.person.age}yo) falls within vulnerable protocol (Child / Elderly).`,
+        impact: 'High',
+      });
+      score += 40;
+    }
+
+    // Medical conditions
+    if (c.person.medicalConditions && c.person.medicalConditions.trim()) {
+      reasons.push({
+        code: 'MEDICAL_CONCERN',
+        label: `Active medical concern noted: "${c.person.medicalConditions}".`,
+        impact: 'High',
+      });
+      score += 35;
+    }
+
+    // Time elapsed since disappearance
+    const missingDate = new Date(
+      `${c.person.dateMissing}T${c.person.timeMissing === 'Unknown' ? '00:00' : c.person.timeMissing}:00Z`
+    ).getTime();
+    const hoursElapsed = Math.max(0, Math.floor((Date.now() - missingDate) / (1000 * 3600)));
+
+    if (hoursElapsed > 48) {
+      reasons.push({
+        code: 'TIME_ELAPSED_CRITICAL',
+        label: `No verified subject contact for over ${hoursElapsed} hours (Critical threshold).`,
+        impact: 'High',
+      });
+      score += 30;
+    } else if (hoursElapsed > 24) {
+      reasons.push({
+        code: 'TIME_ELAPSED_MODERATE',
+        label: `No verified subject contact for ${hoursElapsed} hours.`,
+        impact: 'Medium',
+      });
+      score += 20;
+    }
+
+    // Reports / Sightings severity
+    const reports = this.getAllReports(caseId);
+    if (reports.some((r) => r.verificationStatus === 'Verified')) {
+      reasons.push({
+        code: 'VERIFIED_SIGHTING_ACTIVE',
+        label: 'Active verified sighting logged requiring immediate field dispatch.',
+        impact: 'Medium',
+      });
+      score += 15;
+    }
+
+    let calculated: PriorityLevel = 'Low';
+    if (score >= 60) calculated = 'Urgent';
+    else if (score >= 35) calculated = 'High';
+    else if (score >= 15) calculated = 'Medium';
+
+    const override = this.priorityOverrides.get(caseId);
+
+    return {
+      calculatedPriority: calculated,
+      currentPriority: override ? override.priority : c.priority,
+      isManualOverride: !!override,
+      overrideReason: override?.reason,
+      overrideBy: override?.overrideBy,
+      overrideAt: override?.overrideAt,
+      reasons,
+    };
+  }
+
+  public overrideCasePriority(
+    caseId: string,
+    priority: PriorityLevel,
+    reason: string,
+    officerName: string,
+    officerId: string
+  ): CasePriorityDetails {
+    const c = this.cases.get(caseId);
+    if (!c) throw new Error('Case not found');
+
+    this.priorityOverrides.set(caseId, {
+      priority,
+      reason,
+      overrideBy: officerName,
+      overrideAt: new Date().toISOString(),
+    });
+
+    this.updateCase(caseId, { priority });
+
+    this.addTimelineEvent({
+      caseId,
+      eventType: 'STATUS_CHANGE',
+      title: `Case Priority Adjusted to ${priority}`,
+      description: `Manual priority override by ${officerName}. Rationale: ${reason}`,
+      timestamp: new Date().toISOString(),
+      user: officerName,
+      source: 'Command Desk',
+      statusBadge: priority,
+      referenceId: caseId,
+    });
+
+    this.addAuditLog({
+      userId: officerId,
+      userName: officerName,
+      userRole: 'CASE_OFFICER',
+      action: 'CASE_PRIORITY_OVERRIDDEN',
+      resourceType: 'CASE',
+      resourceId: caseId,
+      details: `Changed priority to ${priority}. Justification: ${reason}`,
+      result: 'SUCCESS',
+    });
+
+    return this.getCasePriorityDetails(caseId);
+  }
+
+  // ----------------------------------------------------
+  // WHAT CHANGED SINCE LAST LOGIN
+  // ----------------------------------------------------
+  public recordUserLogin(userId: string): { current: string; previous: string } {
+    const existing = this.userLogins.get(userId);
+    const now = new Date().toISOString();
+    const previous = existing
+      ? existing.current
+      : new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const updated = { current: now, previous };
+    this.userLogins.set(userId, updated);
+    return updated;
+  }
+
+  public getWhatChangedForUser(userId: string): WhatChangedSummary {
+    const login = this.userLogins.get(userId);
+    const since = login ? login.previous : new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const sinceTime = new Date(since).getTime();
+
+    const items: ChangeItem[] = [];
+
+    // Reports
+    const allReports = Array.from(this.reports.values());
+    const newReports = allReports.filter((r) => new Date(r.createdAt).getTime() > sinceTime);
+    newReports.forEach((r) => {
+      items.push({
+        id: `CHG-REP-${r.id}`,
+        type: 'REPORT',
+        title: `New Sighting Report: ${r.id}`,
+        description: `Submitted for case ${r.caseId} at ${r.location}`,
+        timestamp: r.createdAt,
+        caseId: r.caseId,
+        recordId: r.id,
+      });
+    });
+
+    // Verified Sightings
+    const allSightings = Array.from(this.sightings.values());
+    const newSightings = allSightings.filter((s) => new Date(s.createdAt).getTime() > sinceTime);
+    const verifiedSightings = newSightings.filter((s) => s.verificationStatus === 'Verified');
+    verifiedSightings.forEach((s) => {
+      items.push({
+        id: `CHG-SGT-${s.id}`,
+        type: 'VERIFICATION',
+        title: `Verified Sighting Registered: ${s.id}`,
+        description: `Verified by ${s.reviewerName || 'Desk Officer'} at ${s.location}`,
+        timestamp: s.createdAt,
+        caseId: s.caseId,
+        recordId: s.id,
+      });
+    });
+
+    // Rejected reports
+    const rejectedReports = newReports.filter((r) => r.verificationStatus === 'Rejected');
+
+    // Completed Tasks
+    const allTasks = Array.from(this.tasks.values());
+    const completedTasks = allTasks.filter(
+      (t) => t.completedAt && new Date(t.completedAt).getTime() > sinceTime
+    );
+    completedTasks.forEach((t) => {
+      items.push({
+        id: `CHG-TSK-${t.id}`,
+        type: 'TASK',
+        title: `Task Completed: ${t.title}`,
+        description: `Completed for case ${t.caseId} by ${t.assignedOfficerName}`,
+        timestamp: t.completedAt!,
+        caseId: t.caseId,
+        recordId: t.id,
+      });
+    });
+
+    // New Leads
+    const allLeads = Array.from(this.leads.values());
+    const newLeads = allLeads.filter((l) => new Date(l.createdAt).getTime() > sinceTime);
+    newLeads.forEach((l) => {
+      items.push({
+        id: `CHG-LED-${l.id}`,
+        type: 'LEAD',
+        title: `New Lead Created: ${l.title}`,
+        description: `Priority: ${l.priority} for case ${l.caseId}`,
+        timestamp: l.createdAt,
+        caseId: l.caseId,
+        recordId: l.id,
+      });
+    });
+
+    // New Photos
+    const allFiles = Array.from(this.files.values());
+    const newFiles = allFiles.filter((f) => new Date(f.uploadedAt).getTime() > sinceTime);
+    newFiles.forEach((f) => {
+      items.push({
+        id: `CHG-FLE-${f.id}`,
+        type: 'PHOTO',
+        title: `New Evidence Uploaded: ${f.filename}`,
+        description: `Uploaded by ${f.uploadedBy} for case ${f.relatedCaseId}`,
+        timestamp: f.uploadedAt,
+        caseId: f.relatedCaseId,
+        recordId: f.id,
+      });
+    });
+
+    return {
+      sinceTimestamp: since,
+      newReportsCount: newReports.length,
+      newSightingsCount: newSightings.length,
+      verifiedSightingsCount: verifiedSightings.length,
+      rejectedReportsCount: rejectedReports.length,
+      completedTasksCount: completedTasks.length,
+      newPhotographsCount: newFiles.length,
+      statusChangesCount: 0,
+      newLeadsCount: newLeads.length,
+      items: items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+    };
+  }
+
+  // ----------------------------------------------------
+  // CONFLICTS, AI NEXT ACTIONS & RELATED CASES
+  // ----------------------------------------------------
+  public getCaseConflicts(caseId: string): ConflictItem[] {
+    return this.conflicts.get(caseId) || [];
+  }
+
+  public resolveConflict(
+    caseId: string,
+    conflictId: string,
+    resolutionNotes: string
+  ): ConflictItem | undefined {
+    const list = this.conflicts.get(caseId) || [];
+    const item = list.find((c) => c.id === conflictId);
+    if (!item) return undefined;
+    item.status = 'DISMISSED';
+    item.resolutionNotes = resolutionNotes;
+    return item;
+  }
+
+  public getAiNextActions(caseId: string): AiNextActionSuggestion[] {
+    return this.aiNextActions.get(caseId) || [];
+  }
+
+  public updateAiNextActionStatus(
+    caseId: string,
+    actionId: string,
+    status: 'ACCEPTED' | 'DISMISSED',
+    officerName = 'Command Officer',
+    officerId = 'USR-001'
+  ): AiNextActionSuggestion | undefined {
+    const list = this.aiNextActions.get(caseId) || [];
+    const action = list.find((a) => a.id === actionId);
+    if (!action) return undefined;
+    action.status = status;
+
+    if (status === 'ACCEPTED') {
+      const taskId = this.generateTaskId();
+      const c = this.getCaseById(caseId);
+      const newTask: InvestigationTask = {
+        id: taskId,
+        caseId,
+        caseTitle: c?.title || 'Case Investigation Task',
+        title: action.actionTitle,
+        description: `${action.description} (Origin: AI Investigation Assistant - ${action.whySuggested})`,
+        assignedOfficerId: officerId,
+        assignedOfficerName: officerName,
+        priority: action.priority,
+        dueDate: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        status: 'Pending',
+        createdBy: 'AI Investigation Assistant',
+        createdAt: new Date().toISOString(),
+      };
+      this.createTask(newTask);
+      action.relatedTaskId = taskId;
+    }
+
+    return action;
+  }
+
+  public getPotentialRelatedCases(caseId: string): PotentialRelatedCase[] {
+    return this.potentialRelatedCases.get(caseId) || [];
+  }
+
+  // ----------------------------------------------------
+  // EVIDENCE AUDIT & CASE CLOSURE
+  // ----------------------------------------------------
+  public addEvidenceAudit(fileId: string, entry: EvidenceAuditEntry): void {
+    if (!this.evidenceAuditLogs.has(fileId)) {
+      this.evidenceAuditLogs.set(fileId, []);
+    }
+    this.evidenceAuditLogs.get(fileId)!.push(entry);
+  }
+
+  public getEvidenceAuditHistory(fileId: string): EvidenceAuditEntry[] {
+    return this.evidenceAuditLogs.get(fileId) || [];
+  }
+
+  public getCaseClosureChecklist(caseId: string): CaseClosureChecklist {
+    const existing = this.caseClosureChecklists.get(caseId);
+    if (existing) return existing;
+
+    const defaultChecklist: CaseClosureChecklist = {
+      identityConfirmed: false,
+      leadsReviewed: false,
+      tasksReviewed: false,
+      evidenceUpdated: false,
+      notesCompleted: false,
+      followupsCompleted: false,
+      closureReason: '',
+      finalReportGenerated: false,
+    };
+    this.caseClosureChecklists.set(caseId, defaultChecklist);
+    return defaultChecklist;
+  }
+
+  public updateCaseClosureChecklist(
+    caseId: string,
+    updates: Partial<CaseClosureChecklist>
+  ): CaseClosureChecklist {
+    const existing = this.getCaseClosureChecklist(caseId);
+    const updated = { ...existing, ...updates };
+    this.caseClosureChecklists.set(caseId, updated);
+    return updated;
+  }
+
+  public closeCase(
+    caseId: string,
+    closureReason: string,
+    officerName: string,
+    officerId: string
+  ): Case | undefined {
+    const c = this.cases.get(caseId);
+    if (!c) return undefined;
+
+    const updated = this.updateCase(caseId, {
+      status: 'Closed',
+      statusHistory: [
+        ...c.statusHistory,
+        {
+          fromStatus: c.status,
+          toStatus: 'Closed',
+          changedBy: officerName,
+          changedById: officerId,
+          timestamp: new Date().toISOString(),
+          reason: closureReason,
+        },
+      ],
+    });
+
+    this.updateCaseClosureChecklist(caseId, {
+      closedBy: officerName,
+      closedAt: new Date().toISOString(),
+      closureReason,
+    });
+
+    this.addTimelineEvent({
+      caseId,
+      eventType: 'STATUS_CHANGE',
+      title: 'Case Officially Closed',
+      description: `Investigation finalized and case closed by ${officerName}. Reason: ${closureReason}`,
+      timestamp: new Date().toISOString(),
+      user: officerName,
+      source: 'Command Authority',
+      statusBadge: 'Closed',
+      referenceId: caseId,
+    });
+
+    this.addAuditLog({
+      userId: officerId,
+      userName: officerName,
+      userRole: 'CASE_OFFICER',
+      action: 'CASE_CLOSED',
+      resourceType: 'CASE',
+      resourceId: caseId,
+      details: `Case closed with official reason: ${closureReason}`,
+      result: 'SUCCESS',
+    });
+
+    return updated;
+  }
+
+  // ----------------------------------------------------
+  // SENIOR OFFICER DASHBOARD & STALE CASES
+  // ----------------------------------------------------
+  public getStaleThresholdHours(): number {
+    return this.staleCaseThresholdHours;
+  }
+
+  public setStaleThresholdHours(hours: number): number {
+    this.staleCaseThresholdHours = hours;
+    return hours;
+  }
+
+  public getStaleCases(thresholdHours = this.staleCaseThresholdHours): Case[] {
+    const cutoffTime = Date.now() - thresholdHours * 3600 * 1000;
+    return this.getAllCases()
+      .filter((c) => c.status === 'Active' || c.status === 'Under Investigation')
+      .filter((c) => new Date(c.updatedAt).getTime() < cutoffTime);
+  }
+
+  public getSeniorOfficerDashboardData(): any {
+    const activeCases = this.getAllCases().filter(
+      (c) => c.status === 'Active' || c.status === 'Under Investigation'
+    );
+    const urgentCases = activeCases.filter((c) => c.priority === 'Urgent');
+    const staleCases = this.getStaleCases();
+    const reports = this.getAllReports();
+    const pendingVerifications = reports.filter(
+      (r) => r.verificationStatus === 'New' || r.verificationStatus === 'Under Review'
+    );
+
+    const tasks = this.getAllTasks();
+    const overdueTasks = tasks.filter(
+      (t) => t.status !== 'Completed' && new Date(t.dueDate).getTime() < Date.now()
+    );
+
+    const leads = this.getAllLeads();
+    const openLeads = leads.filter((l) => l.status !== 'CLOSED' && l.status !== 'NOT_USEFUL');
+
+    const sightings = this.getAllSightings();
+    const newVerifiedSightings = sightings.filter((s) => s.verificationStatus === 'Verified');
+
+    return {
+      summaryCounters: {
+        activeCases: activeCases.length,
+        urgentCases: urgentCases.length,
+        staleCases: staleCases.length,
+        pendingVerifications: pendingVerifications.length,
+        overdueTasks: overdueTasks.length,
+        openLeads: openLeads.length,
+        newVerifiedSightings: newVerifiedSightings.length,
+      },
+      attentionCases: activeCases.map((c) => {
+        const cCompleteness = this.getCaseCompleteness(c.id);
+        const cPriority = this.getCasePriorityDetails(c.id);
+        const caseLeads = leads.filter((l) => l.caseId === c.id && l.status !== 'CLOSED');
+        const caseTasks = tasks.filter((t) => t.caseId === c.id && t.status !== 'Completed');
+
+        return {
+          caseId: c.id,
+          title: c.title,
+          personName: c.person.fullName,
+          photoUrl: c.person.photoUrl,
+          priority: c.priority,
+          status: c.status,
+          assignedOfficer: c.assignedOfficerName,
+          lastUpdated: c.updatedAt,
+          openLeadsCount: caseLeads.length,
+          openTasksCount: caseTasks.length,
+          completenessScore: cCompleteness.overallPercent,
+          priorityReasons: cPriority.reasons.map((r) => r.label),
+          isStale:
+            new Date(c.updatedAt).getTime() < Date.now() - this.staleCaseThresholdHours * 3600 * 1000,
+        };
+      }),
+    };
   }
 
   // Location Intelligence
@@ -1687,6 +2356,188 @@ class Database {
       type: 'ALERT',
       caseId: 'MP-2026-000103',
     });
+
+    // 9. Seed Initial Leads
+    const initialLeads: Lead[] = [
+      {
+        id: 'LED-2026-000001',
+        caseId: 'MP-2026-000001',
+        caseTitle: 'Rajesh Kumar - Missing from Ukkadam',
+        title: 'Railway Station Platform 1 Ticket Counter Inquiry',
+        description: 'Interview Railway station booking clerk who reported seeing subject asking about late-night train to Palakkad.',
+        source: 'Transit Police Sighting Log SGT-2026-000002',
+        priority: 'High',
+        assignedOfficerId: 'USR-002',
+        assignedOfficerName: 'Det. Marcus Thorne',
+        createdAt: '2026-09-24T07:30:00Z',
+        dueDate: '2026-09-25T12:00:00Z',
+        status: 'UNDER_INVESTIGATION',
+        notes: 'Clerk remembered blue windbreaker jacket matching description.',
+        updatedAt: '2026-09-24T08:00:00Z',
+      },
+      {
+        id: 'LED-2026-000002',
+        caseId: 'MP-2026-000001',
+        caseTitle: 'Rajesh Kumar - Missing from Ukkadam',
+        title: 'Coimbatore Medical College Hospital Emergency Desk Audit',
+        description: 'Check emergency admission logs for unidentified male admitted following storm power disruption.',
+        source: 'Hospital Intake Desk',
+        priority: 'Urgent',
+        assignedOfficerId: 'USR-003',
+        assignedOfficerName: 'Inspector Sarah Chen',
+        createdAt: '2026-09-24T08:00:00Z',
+        dueDate: '2026-09-24T18:00:00Z',
+        status: 'WAITING_FOR_RESPONSE',
+        notes: 'Requested casualty register dump for Sept 23 night shift.',
+        updatedAt: '2026-09-24T08:15:00Z',
+      },
+      {
+        id: 'LED-2026-000003',
+        caseId: 'MP-2026-000001',
+        caseTitle: 'Rajesh Kumar - Missing from Ukkadam',
+        title: 'Gandhipuram Bus Stand Tea Stall CCTV Collection',
+        description: 'Obtain security footage from Annapoorna tea stall near bay 4.',
+        source: 'Citizen Report REP-2026-000003',
+        priority: 'Medium',
+        assignedOfficerId: 'USR-002',
+        assignedOfficerName: 'Det. Marcus Thorne',
+        createdAt: '2026-09-24T08:30:00Z',
+        dueDate: '2026-09-25T15:00:00Z',
+        status: 'ASSIGNED',
+        updatedAt: '2026-09-24T08:30:00Z',
+      },
+      {
+        id: 'LED-2026-000101',
+        caseId: 'MP-2026-000101',
+        caseTitle: 'Maya Lin - Missing from Central Transit Hub',
+        title: 'Central Transit Station Platform 4 High-Res Camera Dump',
+        description: 'Export 1080p footage from camera 4B covering north exit between 14:30 and 15:15.',
+        source: 'Verified Sighting REP-2026-000101',
+        priority: 'Urgent',
+        assignedOfficerId: 'USR-003',
+        assignedOfficerName: 'Inspector Sarah Chen',
+        createdAt: '2026-09-21T15:40:00Z',
+        dueDate: '2026-09-22T10:00:00Z',
+        status: 'VERIFIED',
+        notes: 'Subject confirmed exiting towards 4th Street transit plaza.',
+        updatedAt: '2026-09-21T16:00:00Z',
+      },
+      {
+        id: 'LED-2026-000102',
+        caseId: 'MP-2026-000101',
+        caseTitle: 'Maya Lin - Missing from Central Transit Hub',
+        title: 'Sunset Community Center Shelter Contact Audit',
+        description: 'Contact night coordinator at Sunset Shelter regarding teenage girl matching description.',
+        source: 'Shelter Desk Log REP-2026-000104',
+        priority: 'High',
+        assignedOfficerId: 'USR-002',
+        assignedOfficerName: 'Det. Marcus Thorne',
+        createdAt: '2026-09-22T21:15:00Z',
+        dueDate: '2026-09-23T12:00:00Z',
+        status: 'UNDER_INVESTIGATION',
+        notes: 'Shelter staff requested officer visit for photo verification.',
+        updatedAt: '2026-09-23T09:00:00Z',
+      },
+    ];
+    initialLeads.forEach((l) => this.leads.set(l.id, l));
+
+    // 10. Seed Initial Conflicts
+    this.conflicts.set('MP-2026-000001', [
+      {
+        id: 'CFL-001',
+        caseId: 'MP-2026-000001',
+        category: 'Clothing',
+        status: 'UNRESOLVED',
+        conflictingValues: [
+          { reportId: 'REP-2026-000001', source: 'Family Intake', value: 'Blue windbreaker & black trousers', timestamp: '2026-09-24T05:00:00Z' },
+          { reportId: 'SGT-2026-000003', source: 'Citizen Sighting #3', value: 'Dark brown hooded sweatshirt', timestamp: '2026-09-24T08:05:00Z' },
+        ],
+      },
+      {
+        id: 'CFL-002',
+        caseId: 'MP-2026-000001',
+        category: 'Direction',
+        status: 'UNRESOLVED',
+        conflictingValues: [
+          { reportId: 'SGT-2026-000002', source: 'Transit Patrol', value: 'Boarding outbound train towards Palakkad', timestamp: '2026-09-24T07:20:00Z' },
+          { reportId: 'SGT-2026-000003', source: 'Gandhipuram Citizen', value: 'Waiting under bus stand shelter heading north', timestamp: '2026-09-24T08:05:00Z' },
+        ],
+      },
+    ]);
+
+    this.conflicts.set('MP-2026-000101', [
+      {
+        id: 'CFL-003',
+        caseId: 'MP-2026-000101',
+        category: 'Physical Description',
+        status: 'UNRESOLVED',
+        conflictingValues: [
+          { reportId: 'REP-2026-000101', source: 'Carlos Rivera', value: 'Hair tied back in ponytail with red backpack', timestamp: '2026-09-21T14:45:00Z' },
+          { reportId: 'REP-2026-000104', source: 'Shelter Staff', value: 'Short hair cut with black tote bag', timestamp: '2026-09-22T21:10:00Z' },
+        ],
+      },
+    ]);
+
+    // 11. Seed Initial AI Next Actions
+    this.aiNextActions.set('MP-2026-000001', [
+      {
+        id: 'ACT-001',
+        caseId: 'MP-2026-000001',
+        actionTitle: 'Verify Railway Station Platform 1 CCTV',
+        description: 'Cross-reference Sighting SGT-2026-000002 timestamp (7:20 PM) with Railway station camera 3 facing ticket booth.',
+        whySuggested: 'High-priority unverified sighting logged near high-volume transit corridor within 1 hour of disappearance.',
+        priority: 'Urgent',
+        status: 'PENDING',
+      },
+      {
+        id: 'ACT-002',
+        caseId: 'MP-2026-000001',
+        actionTitle: 'Resolve Conflicting Clothing Descriptions',
+        description: 'Contact reporting party Anand R. (SGT-2026-000003) to confirm if dark brown hooded jacket was worn over blue windbreaker.',
+        whySuggested: 'Conflict detected between family intake description and Gandhipuram citizen report.',
+        priority: 'High',
+        status: 'PENDING',
+      },
+      {
+        id: 'ACT-003',
+        caseId: 'MP-2026-000001',
+        actionTitle: 'Dispatch Field Team to Coimbatore CMC Casualty Desk',
+        description: 'Send patrol officer to physically review admissions ledger from storm power outage period.',
+        whySuggested: 'Subject has documented hypertension & cardiovascular concern.',
+        priority: 'High',
+        status: 'PENDING',
+      },
+    ]);
+
+    this.aiNextActions.set('MP-2026-000101', [
+      {
+        id: 'ACT-004',
+        caseId: 'MP-2026-000101',
+        actionTitle: 'Conduct Physical Verification at Sunset Community Shelter',
+        description: 'Dispatch Officer Marcus Thorne to inspect shelter intake log and photo match subject.',
+        whySuggested: 'Shelter report matches age profile (14yo) and general disappearance timeframe.',
+        priority: 'Urgent',
+        status: 'PENDING',
+      },
+    ]);
+
+    // 12. Seed Initial Potential Related Cases
+    this.potentialRelatedCases.set('MP-2026-000001', [
+      {
+        id: 'REL-001',
+        caseId: 'MP-2026-000001',
+        targetCaseId: 'MP-2026-000107',
+        targetCaseTitle: 'David O\'Connor - Missing from Golden Gate Sector',
+        targetPersonName: 'David O\'Connor',
+        similarityScore: 78,
+        matchingReasons: [
+          'Similar age range (54yo vs 58yo)',
+          'Similar storm power outage circumstances',
+          'Medical concern noted for both subjects',
+        ],
+        status: 'PENDING',
+      },
+    ]);
   }
 }
 

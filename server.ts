@@ -8,6 +8,7 @@ import { casesRouter } from './src/server/routes/cases.ts';
 import { reportsRouter } from './src/server/routes/reports.ts';
 import { sightingsRouter } from './src/server/routes/sightings.ts';
 import { tasksRouter } from './src/server/routes/tasks.ts';
+import { leadsRouter } from './src/server/routes/leads.ts';
 import { aiRouter } from './src/server/routes/ai.ts';
 import { systemRouter } from './src/server/routes/system.ts';
 import { locationRouter } from './src/server/routes/location.ts';
@@ -46,6 +47,7 @@ async function startServer() {
   app.use('/api/reports', reportsRouter);
   app.use('/api/sightings', sightingsRouter);
   app.use('/api/tasks', tasksRouter);
+  app.use('/api/leads', leadsRouter);
   app.use('/api/ai', aiRouter);
   app.use('/api/location', locationRouter);
   app.use('/api', systemRouter);

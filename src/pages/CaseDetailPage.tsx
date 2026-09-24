@@ -1,21 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
-  Calendar,
   Clock,
-  MapPin,
-  User,
   Shield,
-  FileText,
   Camera,
   CheckCircle2,
-  ListTodo,
   Sparkles,
-  History,
   AlertTriangle,
   Plus,
-  Send,
-  Lock,
+  Printer,
+  ShieldCheck,
+  Compass,
+  ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../services/api.ts';
 import {
@@ -27,6 +24,13 @@ import {
   FileAttachment,
   CaseStatus,
   AiMatchAnalysis,
+  Lead,
+  CaseCompleteness,
+  CasePriorityDetails,
+  ConflictItem,
+  AiNextActionSuggestion,
+  PotentialRelatedCase,
+  PriorityLevel,
 } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { PriorityBadge } from '../components/PriorityBadge.tsx';
@@ -35,6 +39,11 @@ import { AiSummaryModal } from '../components/AiSummaryModal.tsx';
 import { CreateTaskModal } from '../components/CreateTaskModal.tsx';
 import { UploadPhotoModal } from '../components/UploadPhotoModal.tsx';
 import { VerifyReportModal } from '../components/VerifyReportModal.tsx';
+import { LeadBoard } from '../components/LeadBoard.tsx';
+import { CreateLeadModal } from '../components/CreateLeadModal.tsx';
+import { CaseClosureModal } from '../components/CaseClosureModal.tsx';
+import { PrintableCaseReportModal } from '../components/PrintableCaseReportModal.tsx';
+import { EvidenceAuditModal } from '../components/EvidenceAuditModal.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface CaseDetailPageProps {
@@ -48,28 +57,50 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
   const [reports, setReports] = useState<Report[]>([]);
   const [sightings, setSightings] = useState<Sighting[]>([]);
   const [tasks, setTasks] = useState<InvestigationTask[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
+  const [completeness, setCompleteness] = useState<CaseCompleteness | null>(null);
+  const [priorityDetails, setPriorityDetails] = useState<CasePriorityDetails | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
+  const [aiNextActions, setAiNextActions] = useState<AiNextActionSuggestion[]>([]);
+  const [relatedCases, setRelatedCases] = useState<PotentialRelatedCase[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Active Sub-tab
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'reports' | 'map' | 'timeline' | 'photos' | 'tasks' | 'ai' | 'audit'
-  >('overview');
+    'cockpit' | 'at-a-glance' | 'leads' | 'reports' | 'map' | 'timeline' | 'photos' | 'tasks' | 'ai' | 'closure'
+  >('cockpit');
 
   // Modals state
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [newStatus, setNewStatus] = useState<CaseStatus>('Active');
   const [statusReason, setStatusReason] = useState('');
-  const [statusSubmitting, setStatusSubmitting] = useState(false);
+
+  const [priorityModalOpen, setPriorityModalOpen] = useState(false);
+  const [overridePriority, setOverridePriority] = useState<PriorityLevel>('High');
+  const [overrideReason, setOverrideReason] = useState('');
 
   const [aiSummaryModalOpen, setAiSummaryModalOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [photoModalOpen, setPhotoModalOpen] = useState(false);
+  const [closureModalOpen, setClosureModalOpen] = useState(false);
+  const [reportPdfModalOpen, setReportPdfModalOpen] = useState(false);
 
   // Sighting verification modal
   const [selectedReportForVerify, setSelectedReportForVerify] = useState<Report | null>(null);
+
+  // Evidence audit modal
+  const [selectedFileForAudit, setSelectedFileForAudit] = useState<FileAttachment | null>(null);
+
+  // Distance calculator state
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [distanceResult, setDistanceResult] = useState<any | null>(null);
+  const [calcDistanceLoading, setCalcDistanceLoading] = useState(false);
 
   // Quick AI Match Sandbox State
   const [customSightingText, setCustomSightingText] = useState('');
@@ -79,21 +110,35 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
   const loadCaseData = async () => {
     setLoading(true);
     try {
-      const [c, r, s, t, tl, fl] = await Promise.all([
+      const [c, r, s, t, l, tl, fl, comp, pri, cfl, nxt, rel, locRes] = await Promise.all([
         api.getCaseById(caseId),
         api.getReports({ caseId }),
         api.getSightings({ caseId }),
         api.getTasks({ caseId }),
+        api.getLeads({ caseId }),
         api.getCaseTimeline(caseId),
         api.getCasePhotos(caseId),
+        api.getCaseCompleteness(caseId),
+        api.getCasePriorityDetails(caseId),
+        api.getCaseConflicts(caseId),
+        api.getAiNextActions(caseId),
+        api.getPotentialRelatedCases(caseId),
+        api.getCaseLocations(caseId),
       ]);
 
       setCaseData(c);
       setReports(r.reports);
       setSightings(s.sightings);
       setTasks(t.tasks);
+      setLeads(l.leads);
       setTimeline(tl.events);
       setFiles(fl.files);
+      setCompleteness(comp);
+      setPriorityDetails(pri);
+      setConflicts(cfl.conflicts);
+      setAiNextActions(nxt.actions);
+      setRelatedCases(rel.relatedCases);
+      setLocations(locRes.locations);
     } catch (err: any) {
       setError(err.message || 'Failed to load case data.');
     } finally {
@@ -105,46 +150,117 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
     loadCaseData();
   }, [caseId]);
 
-  const handleUpdateStatus = async (e: React.FormEvent) => {
+  const handleStatusChangeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!caseData || !statusReason.trim()) return;
+    if (!statusReason.trim()) return;
 
-    setStatusSubmitting(true);
     try {
-      const updated = await api.updateCaseStatus(caseData.id, newStatus, statusReason.trim());
-      setCaseData(updated);
+      await api.updateCaseStatus(caseId, newStatus, statusReason);
       setStatusModalOpen(false);
       setStatusReason('');
-      // Reload timeline
-      const tl = await api.getCaseTimeline(caseId);
-      setTimeline(tl.events);
+      loadCaseData();
     } catch (err: any) {
-      alert(err.message || 'Status transition error');
-    } finally {
-      setStatusSubmitting(false);
+      alert(err.message || 'Failed to update status.');
+    }
+  };
+
+  const handlePriorityOverrideSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!overrideReason.trim()) return;
+
+    try {
+      await api.overrideCasePriority(caseId, overridePriority, overrideReason);
+      setPriorityModalOpen(false);
+      setOverrideReason('');
+      loadCaseData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to override priority.');
+    }
+  };
+
+  const handleMissingInfoToggle = async (itemId: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'Collected' ? 'Required' : 'Collected';
+    try {
+      const updatedComp = await api.updateMissingInfoStatus(caseId, itemId, nextStatus);
+      setCompleteness(updatedComp);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleResolveConflict = async (conflictId: string) => {
+    try {
+      await api.resolveConflict(caseId, conflictId, 'Reviewed and resolved by officer');
+      loadCaseData();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAiActionDecision = async (actionId: string, status: 'ACCEPTED' | 'DISMISSED') => {
+    try {
+      await api.updateAiNextActionStatus(caseId, actionId, status);
+      loadCaseData();
+    } catch {
+      // ignore
     }
   };
 
   const handleRunAiMatch = async () => {
-    if (!caseData || !customSightingText.trim()) return;
+    if (!customSightingText.trim()) return;
     setAiMatchLoading(true);
     try {
-      const res = await api.matchDescription(caseData.id, customSightingText.trim());
-      setAiMatchAnalysis(res);
+      const result = await api.matchDescription(caseId, customSightingText);
+      setAiMatchAnalysis(result);
     } catch (err: any) {
-      alert(err.message || 'AI correlation failed');
+      alert(err.message || 'AI analysis failed.');
     } finally {
       setAiMatchLoading(false);
     }
   };
 
-  const isOfficerOrAdmin = role === 'SUPER_ADMIN' || role === 'CASE_OFFICER';
+  const handleCalculateDistanceToLastKnown = () => {
+    if (!navigator.geolocation) {
+      alert('Browser geolocation is not supported.');
+      return;
+    }
+
+    setCalcDistanceLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const uLat = pos.coords.latitude;
+        const uLng = pos.coords.longitude;
+        setUserCoords({ lat: uLat, lng: uLng });
+
+        try {
+          const lkl = caseData?.person.lastKnownCoordinates || { lat: 10.9976, lng: 76.9664 };
+          const res = await api.calculateDistance({
+            originLatitude: uLat,
+            originLongitude: uLng,
+            destinationLatitude: lkl.lat,
+            destinationLongitude: lkl.lng,
+            originLabel: 'Your Authorized Current Location',
+            destinationLabel: `Last Known Location (${caseData?.person.lastKnownLocation})`,
+          });
+          setDistanceResult(res);
+        } catch {
+          // ignore
+        } finally {
+          setCalcDistanceLoading(false);
+        }
+      },
+      () => {
+        alert('Location permission denied.');
+        setCalcDistanceLoading(false);
+      }
+    );
+  };
 
   if (loading) {
     return (
-      <div className="p-12 flex flex-col items-center justify-center gap-3 text-slate-400">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent" />
-        <span className="font-mono text-xs">Loading case file {caseId}...</span>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-3 font-mono text-xs text-slate-400">
+        <RefreshCw className="h-6 w-6 animate-spin text-cyan-400" />
+        <span>Loading Investigation Cockpit Data for {caseId}...</span>
       </div>
     );
   }
@@ -152,619 +268,769 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
   if (error || !caseData) {
     return (
       <div className="p-8 max-w-xl mx-auto text-center space-y-4">
-        <div className="p-4 rounded bg-rose-950/60 border border-rose-800 text-rose-300 text-xs">
-          {error || 'Case file could not be located.'}
+        <div className="p-4 bg-red-950/50 border border-red-500/40 rounded-lg text-red-300 text-xs font-mono">
+          {error || 'Unable to load case details.'}
         </div>
         <button
           onClick={onBack}
-          className="px-4 py-2 bg-slate-800 text-slate-200 font-mono text-xs rounded hover:bg-slate-700"
+          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-semibold cursor-pointer"
         >
-          Return to Dashboard
+          Return to Case Directory
         </button>
       </div>
     );
   }
 
+  const verifiedSightingsCount = sightings.filter((s) => s.verificationStatus === 'Verified').length;
+  const underReviewReportsCount = reports.filter((r) => r.verificationStatus === 'Under Review').length;
+  const openLeadsCount = leads.filter((l) => l.status !== 'CLOSED' && l.status !== 'NOT_USEFUL').length;
+  const openTasksCount = tasks.filter((t) => t.status !== 'Completed').length;
+  const overdueTasksCount = tasks.filter((t) => t.status !== 'Completed' && new Date(t.dueDate).getTime() < Date.now()).length;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Back Button & Case Action Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      {/* Top Cockpit Navigation Bar */}
+      <div className="border-b border-slate-800 bg-slate-950/80 sticky top-0 z-30 backdrop-blur-md px-6 py-3 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="p-2 text-slate-400 hover:text-slate-100 hover:bg-slate-900 rounded cursor-pointer transition-colors"
-            title="Back"
+            className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+            title="Return to Directory"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-mono text-sm font-bold text-cyan-400">{caseData.id}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-bold text-cyan-400">{caseData.id}</span>
               <PriorityBadge priority={caseData.priority} />
               <StatusBadge status={caseData.status} />
             </div>
-            <h1 className="text-xl font-bold text-slate-100 mt-0.5">{caseData.title}</h1>
+            <h1 className="text-base font-bold text-slate-100 truncate max-w-xl">{caseData.title}</h1>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          {isOfficerOrAdmin && (
-            <button
-              onClick={() => {
-                setNewStatus(caseData.status);
-                setStatusModalOpen(true);
-              }}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-mono text-xs font-semibold rounded cursor-pointer transition-colors"
-            >
-              Transition Status
-            </button>
-          )}
-
-          {isOfficerOrAdmin && (
-            <button
-              onClick={() => setTaskModalOpen(true)}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-mono text-xs font-semibold rounded cursor-pointer transition-colors"
-            >
-              + Dispatch Task
-            </button>
-          )}
-
+        {/* Header Actions */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setPhotoModalOpen(true)}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-mono text-xs font-semibold rounded cursor-pointer transition-colors"
+            onClick={() => setReportPdfModalOpen(true)}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-semibold rounded flex items-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
           >
-            + Add Evidence
+            <Printer className="h-3.5 w-3.5 text-cyan-400" />
+            <span>Generate Report</span>
           </button>
 
-          <button
-            onClick={() => setAiSummaryModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold rounded shadow cursor-pointer transition-colors"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>AI Briefing (SITREP)</span>
-          </button>
+          {(role === 'SUPER_ADMIN' || role === 'CASE_OFFICER') && (
+            <>
+              <button
+                onClick={() => setPriorityModalOpen(true)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-mono font-semibold rounded flex items-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
+              >
+                <span>Override Priority</span>
+              </button>
+
+              <button
+                onClick={() => setStatusModalOpen(true)}
+                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-semibold text-xs rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>Change Status</span>
+              </button>
+
+              <button
+                onClick={() => setClosureModalOpen(true)}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Close Case</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Tabs Navigation */}
-      <div className="flex items-center gap-1 border-b border-slate-800 overflow-x-auto text-xs font-mono">
-        {[
-          { id: 'overview', label: '1. Overview & Profile', count: undefined },
-          { id: 'reports', label: '2. Reports & Tips', count: reports.length },
-          { id: 'map', label: '3. Geographic Trajectory', count: sightings.length },
-          { id: 'timeline', label: '4. Case Timeline', count: timeline.length },
-          { id: 'photos', label: '5. Evidence Locker', count: files.length },
-          { id: 'tasks', label: '6. Tasks', count: tasks.length },
-          { id: 'ai', label: '7. AI Match Tools', count: undefined },
-          { id: 'audit', label: '8. Status History & Audit', count: caseData.statusHistory.length },
-        ].map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
+      {/* Main Cockpit Content Area */}
+      <div className="flex-1 p-6 space-y-6 max-w-7xl mx-auto w-full">
+        {/* CASE AT A GLANCE HEADER CARD */}
+        <div className="p-5 rounded-xl border border-slate-800 bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 shadow-xl space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            {/* Photo & Profile */}
+            <div className="flex items-start gap-3 col-span-1 lg:col-span-2">
+              <img
+                src={caseData.person.photoUrl}
+                alt={caseData.person.fullName}
+                className="h-28 w-28 object-cover rounded-lg border-2 border-slate-700 shrink-0"
+              />
+              <div className="space-y-1 text-xs">
+                <div className="text-base font-bold text-slate-100">{caseData.person.fullName}</div>
+                <div className="text-slate-400 font-mono">
+                  Age: {caseData.person.age} ({caseData.person.gender}) | Height: {caseData.person.height}
+                </div>
+                <div className="text-slate-300">
+                  <span className="text-slate-500 font-mono">Disappearance:</span> {caseData.person.dateMissing} at {caseData.person.timeMissing}
+                </div>
+                <div className="text-slate-300">
+                  <span className="text-slate-500 font-mono">Last Location:</span> {caseData.person.lastKnownLocation}
+                </div>
+                <div className="text-slate-400 italic line-clamp-2">{caseData.person.circumstances}</div>
+              </div>
+            </div>
+
+            {/* Officer & Priority Info */}
+            <div className="space-y-1 text-xs font-mono text-slate-400 border-t lg:border-t-0 lg:border-l border-slate-800 pt-3 lg:pt-0 lg:pl-4">
+              <div><span className="text-slate-500">Lead Officer:</span> {caseData.assignedOfficerName}</div>
+              <div><span className="text-slate-500">Agency:</span> {caseData.leadAgency}</div>
+              <div><span className="text-slate-500">Last Updated:</span> {new Date(caseData.updatedAt).toLocaleString()}</div>
+              <div><span className="text-slate-500">Completeness:</span> {completeness?.overallPercent || 0}%</div>
+              {priorityDetails?.isManualOverride && (
+                <div className="text-amber-400 text-[11px] pt-1">
+                  Manual Priority Override: {priorityDetails.currentPriority} (Reason: {priorityDetails.overrideReason})
+                </div>
+              )}
+            </div>
+
+            {/* Quick Counters */}
+            <div className="grid grid-cols-3 gap-2 col-span-1 font-mono text-center">
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Reports</div>
+                <div className="text-lg font-bold text-cyan-400">{reports.length}</div>
+              </div>
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Sightings</div>
+                <div className="text-lg font-bold text-purple-400">{sightings.length}</div>
+              </div>
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Verified</div>
+                <div className="text-lg font-bold text-emerald-400">{verifiedSightingsCount}</div>
+              </div>
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Under Review</div>
+                <div className="text-lg font-bold text-amber-400">{underReviewReportsCount}</div>
+              </div>
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Leads</div>
+                <div className="text-lg font-bold text-blue-400">{openLeadsCount}</div>
+              </div>
+              <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                <div className="text-[10px] text-slate-500 uppercase">Tasks</div>
+                <div className="text-lg font-bold text-orange-400">{openTasksCount}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ATTENTION REQUIRED BANNER */}
+        {(overdueTasksCount > 0 || conflicts.length > 0 || underReviewReportsCount > 0) && (
+          <div className="p-4 rounded-xl border border-red-500/30 bg-red-950/20 text-xs text-red-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-400 shrink-0" />
+              <div>
+                <div className="font-bold font-mono text-slate-100 flex items-center gap-2">
+                  <span>ATTENTION REQUIRED ON CASE</span>
+                </div>
+                <div className="text-[11px] text-red-300/80 flex items-center gap-3 flex-wrap">
+                  {overdueTasksCount > 0 && <span>• {overdueTasksCount} Overdue Investigation Tasks</span>}
+                  {conflicts.length > 0 && <span>• {conflicts.length} Conflicting Sighting Accounts</span>}
+                  {underReviewReportsCount > 0 && <span>• {underReviewReportsCount} Sighting Reports Pending Verification</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* NAVIGATION TABS */}
+        <div className="flex items-center gap-1 border-b border-slate-800 overflow-x-auto text-xs font-medium pb-px">
+          {[
+            { id: 'cockpit', label: 'Cockpit Overview' },
+            { id: 'at-a-glance', label: 'Case Completeness & Priority' },
+            { id: 'leads', label: `Leads Board (${openLeadsCount})` },
+            { id: 'reports', label: `Reports & Sightings (${reports.length})` },
+            { id: 'map', label: 'Map & Location Story' },
+            { id: 'timeline', label: `Timeline (${timeline.length})` },
+            { id: 'photos', label: `Evidence Vault (${files.length})` },
+            { id: 'tasks', label: `Tasks (${openTasksCount})` },
+            { id: 'ai', label: 'AI Assistant' },
+          ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 font-medium border-b-2 whitespace-nowrap cursor-pointer transition-colors ${
-                isActive
-                  ? 'border-cyan-400 text-cyan-300 bg-slate-900/60'
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+              className={`px-4 py-2.5 rounded-t text-xs font-mono transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'border-cyan-400 text-cyan-300 bg-slate-900 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
               }`}
             >
-              <span>{tab.label}</span>
-              {tab.count !== undefined && (
-                <span className="font-mono text-[10px] px-1.5 rounded bg-slate-800 text-slate-400 tabular-nums">
-                  {tab.count}
-                </span>
-              )}
+              {tab.label}
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
 
-      {/* Tab 1: Overview & Person Profile */}
-      {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Photo & Key Demographics */}
-          <div className="space-y-4">
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-md">
-              <div className="relative aspect-square w-full rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
-                <img
-                  src={caseData.person.photoUrl}
-                  alt={caseData.person.fullName}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute bottom-2 left-2">
-                  <StatusBadge status={caseData.status} />
+        {/* TAB 1: COCKPIT OVERVIEW */}
+        {activeTab === 'cockpit' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left 2 Columns */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Verified Facts vs New Information */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Verified Info */}
+                <div className="p-4 rounded-xl border border-emerald-500/30 bg-slate-900/60 space-y-3">
+                  <h3 className="text-xs font-mono font-bold text-emerald-400 uppercase flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Verified Information Only ({verifiedSightingsCount})</span>
+                  </h3>
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {sightings
+                      .filter((s) => s.verificationStatus === 'Verified')
+                      .map((s) => (
+                        <div key={s.id} className="p-2.5 bg-slate-950 border border-slate-800 rounded text-xs space-y-1">
+                          <div className="flex items-center justify-between font-mono text-[10px]">
+                            <span className="text-emerald-400 font-bold">{s.location}</span>
+                            <span className="text-slate-500">{s.time}</span>
+                          </div>
+                          <p className="text-slate-300 text-[11px]">{s.description}</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* New Unverified Info */}
+                <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/60 space-y-3">
+                  <h3 className="text-xs font-mono font-bold text-amber-400 uppercase flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    <span>New Sighting Reports ({underReviewReportsCount})</span>
+                  </h3>
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {reports
+                      .filter((r) => r.verificationStatus === 'New' || r.verificationStatus === 'Under Review')
+                      .map((r) => (
+                        <div key={r.id} className="p-2.5 bg-slate-950 border border-slate-800 rounded text-xs space-y-1">
+                          <div className="flex items-center justify-between font-mono text-[10px]">
+                            <span className="text-amber-400 font-bold">{r.location}</span>
+                            <button
+                              onClick={() => setSelectedReportForVerify(r)}
+                              className="text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                            >
+                              Verify Now
+                            </button>
+                          </div>
+                          <p className="text-slate-300 text-[11px]">{r.description}</p>
+                        </div>
+                      ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-2 text-xs">
-                <div className="font-bold text-base text-slate-100">{caseData.person.fullName}</div>
-                <div className="grid grid-cols-2 gap-2 text-slate-300 font-mono text-[11px] pt-2 border-t border-slate-800">
-                  <div>
-                    <span className="text-slate-500">Age: </span>
-                    {caseData.person.age} years
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Gender: </span>
-                    {caseData.person.gender}
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Height: </span>
-                    {caseData.person.height}
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Languages: </span>
-                    {caseData.person.languages?.join(', ')}
-                  </div>
+              {/* Active Leads Summary */}
+              <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-mono font-bold text-slate-200 uppercase flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-cyan-400" />
+                    <span>Active Investigation Leads ({openLeadsCount})</span>
+                  </h3>
+                  <button
+                    onClick={() => setActiveTab('leads')}
+                    className="text-xs font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Full Lead Board</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 space-y-1">
-                <div>
-                  <span className="text-slate-500">Assigned Officer: </span>
-                  <span className="text-slate-300 font-medium">{caseData.assignedOfficerName}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Lead Agency: </span>
-                  <span className="text-slate-300">{caseData.leadAgency}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {leads
+                    .filter((l) => l.status !== 'CLOSED')
+                    .slice(0, 4)
+                    .map((l) => (
+                      <div key={l.id} className="p-3 bg-slate-950 border border-slate-800 rounded text-xs space-y-1">
+                        <div className="flex items-center justify-between font-mono text-[10px]">
+                          <span className="text-slate-400 font-bold">{l.id}</span>
+                          <span className="text-amber-400">{l.priority}</span>
+                        </div>
+                        <div className="font-semibold text-slate-100">{l.title}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">Assigned: {l.assignedOfficerName}</div>
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
 
-            {/* Reporting Person Contact (Privacy Protected) */}
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs">
-              <h3 className="font-mono text-[11px] uppercase font-bold text-slate-400 tracking-wider">
-                Intake Reporting Party
-              </h3>
-              <div className="text-slate-300 font-semibold">
-                {caseData.person.reportingPersonName} ({caseData.person.reportingPersonRelationship})
-              </div>
-              {caseData.person.reportingPersonContact ? (
-                <div className="font-mono text-cyan-400 text-[11px]">
-                  {caseData.person.reportingPersonContact}
+            {/* Right Column: AI Assistance & Next Actions */}
+            <div className="space-y-6">
+              {/* AI Next Actions Panel */}
+              <div className="p-4 rounded-xl border border-cyan-500/30 bg-slate-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-mono font-bold text-cyan-300 uppercase flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-cyan-400" />
+                    <span>AI Suggested Next Actions</span>
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-500">AI-Assisted</span>
                 </div>
-              ) : (
-                <div className="text-slate-500 italic text-[11px] flex items-center gap-1">
-                  <Lock className="h-3 w-3 text-emerald-400" />
-                  Contact details hidden by privacy filter
+
+                <div className="space-y-2">
+                  {aiNextActions
+                    .filter((a) => a.status === 'PENDING')
+                    .map((action) => (
+                      <div key={action.id} className="p-3 bg-slate-950 border border-slate-800 rounded text-xs space-y-2">
+                        <div className="font-semibold text-slate-100">{action.actionTitle}</div>
+                        <p className="text-[11px] text-slate-400">{action.description}</p>
+                        <div className="text-[10px] font-mono text-cyan-400/80 bg-cyan-950/40 p-1.5 rounded border border-cyan-500/20">
+                          Why: {action.whySuggested}
+                        </div>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            onClick={() => handleAiActionDecision(action.id, 'DISMISSED')}
+                            className="px-2.5 py-1 bg-slate-800 text-slate-400 hover:text-slate-200 rounded font-mono text-[10px] cursor-pointer"
+                          >
+                            Dismiss
+                          </button>
+                          <button
+                            onClick={() => handleAiActionDecision(action.id, 'ACCEPTED')}
+                            className="px-2.5 py-1 bg-cyan-600 text-slate-950 hover:bg-cyan-500 rounded font-mono text-[10px] font-bold cursor-pointer"
+                          >
+                            Accept & Create Task
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Conflicts Panel */}
+              {conflicts.length > 0 && (
+                <div className="p-4 rounded-xl border border-red-500/30 bg-slate-900/60 space-y-3">
+                  <h3 className="text-xs font-mono font-bold text-red-400 uppercase flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>Conflicting Sighting Details ({conflicts.length})</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {conflicts.map((c) => (
+                      <div key={c.id} className="p-3 bg-slate-950 border border-slate-800 rounded text-xs space-y-2">
+                        <div className="font-mono text-[10px] text-red-400 font-bold uppercase">
+                          Conflict Category: {c.category}
+                        </div>
+                        <div className="space-y-1">
+                          {c.conflictingValues.map((cv, idx) => (
+                            <div key={idx} className="text-[11px] text-slate-300 font-mono">
+                              • <span className="text-slate-500">{cv.source}:</span> "{cv.value}"
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => handleResolveConflict(c.id)}
+                          className="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-mono text-[10px] cursor-pointer"
+                        >
+                          Mark Conflict Reviewed
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
           </div>
+        )}
 
-          {/* Right 2 Columns: Physical Traits, Circumstances & Internal Notes */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Characteristics Grid */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-md text-xs">
-              <h3 className="font-mono text-xs uppercase font-bold text-cyan-400 tracking-wider">
-                Investigative Physical Profile
+        {/* TAB 2: CASE COMPLETENESS & PRIORITY RATIONALE */}
+        {activeTab === 'at-a-glance' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Completeness Section */}
+            <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/60 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-cyan-400" />
+                <span>Case Information Completeness Assessment</span>
               </h3>
+              <p className="text-xs text-slate-400">
+                Indicates completeness of recorded information (Not a case outcome success score).
+              </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-3 rounded bg-slate-950 border border-slate-800/80">
-                  <div className="font-semibold text-slate-300 mb-1">Physical Description:</div>
-                  <p className="text-slate-200 leading-relaxed">
-                    {caseData.person.physicalDescription || 'None documented.'}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded bg-slate-950 border border-slate-800/80">
-                  <div className="font-semibold text-slate-300 mb-1">Clothing When Last Seen:</div>
-                  <p className="text-slate-200 leading-relaxed">
-                    {caseData.person.clothingDescription || 'Unknown.'}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded bg-slate-950 border border-slate-800/80">
-                  <div className="font-semibold text-slate-300 mb-1">Identifying Marks:</div>
-                  <p className="text-slate-200 leading-relaxed">
-                    {caseData.person.identifyingMarks || 'None noted.'}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded bg-slate-950 border border-slate-800/80">
-                  <div className="font-semibold text-slate-300 mb-1">Medical Conditions:</div>
-                  <p className="text-slate-200 leading-relaxed">
-                    {caseData.person.medicalConditions || 'No critical conditions reported.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Circumstances & Last Known Location */}
-              <div className="space-y-3 pt-3 border-t border-slate-800">
-                <div className="flex items-start gap-2 text-slate-200">
-                  <MapPin className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
+              {completeness && (
+                <div className="space-y-3">
                   <div>
-                    <span className="font-semibold">Last Known Location: </span>
-                    <span>{caseData.person.lastKnownLocation}</span>
-                    <span className="font-mono text-slate-500 text-[11px] ml-2">
-                      ({caseData.person.dateMissing} at {caseData.person.timeMissing})
-                    </span>
+                    <div className="flex justify-between text-xs font-mono text-slate-300 mb-1">
+                      <span>Overall Completeness</span>
+                      <span className="font-bold text-cyan-400">{completeness.overallPercent}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                      <div className="h-full bg-cyan-400 transition-all duration-300" style={{ width: `${completeness.overallPercent}%` }} />
+                    </div>
                   </div>
-                </div>
 
-                <div className="p-3 rounded bg-slate-950 border border-slate-800/80">
-                  <span className="font-semibold text-slate-300 block mb-1">
-                    Activity & Circumstances:
-                  </span>
-                  <p className="text-slate-200 leading-relaxed">{caseData.person.circumstances}</p>
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                      <div className="text-slate-500">Person Details</div>
+                      <div className="text-slate-200 font-bold">{completeness.personDetailsPercent}%</div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                      <div className="text-slate-500">Report Info</div>
+                      <div className="text-slate-200 font-bold">{completeness.reportInfoPercent}%</div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                      <div className="text-slate-500">Location Data</div>
+                      <div className="text-slate-200 font-bold">{completeness.locationDataPercent}%</div>
+                    </div>
+                    <div className="p-2.5 rounded bg-slate-950 border border-slate-800">
+                      <div className="text-slate-500">Verification</div>
+                      <div className="text-slate-200 font-bold">{completeness.verificationPercent}%</div>
+                    </div>
+                  </div>
 
-              {/* Internal Notes (Officer Only) */}
-              {isOfficerOrAdmin && caseData.internalNotes && (
-                <div className="p-3 rounded bg-amber-950/20 border border-amber-800/40">
-                  <span className="font-mono font-bold text-amber-400 text-[11px] uppercase block mb-1 flex items-center gap-1.5">
-                    <Lock className="h-3 w-3" />
-                    Internal Investigation Notes (Confidential)
-                  </span>
-                  <p className="text-slate-300 leading-relaxed">{caseData.internalNotes}</p>
+                  {/* Missing Information Checklist */}
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <h4 className="text-xs font-mono font-bold text-slate-300 uppercase">Missing Information Checklist</h4>
+                    <div className="space-y-2">
+                      {completeness.missingItems.map((item) => (
+                        <div key={item.id} className="p-2.5 bg-slate-950 border border-slate-800 rounded flex items-center justify-between text-xs">
+                          <div>
+                            <div className="font-semibold text-slate-200">{item.label}</div>
+                            <div className="text-[10px] font-mono text-slate-500">{item.category}</div>
+                          </div>
+                          <button
+                            onClick={() => handleMissingInfoToggle(item.id, item.status)}
+                            className={`px-2.5 py-1 rounded font-mono text-[10px] font-bold cursor-pointer ${
+                              item.status === 'Collected'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                                : 'bg-amber-950 text-amber-400 border border-amber-500/40'
+                            }`}
+                          >
+                            {item.status}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Quick Sighting Mini Map Preview */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+            {/* Priority Rationale Section */}
+            <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/60 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-mono text-xs uppercase font-bold text-slate-300 tracking-wider">
-                  Incident & Sighting Trail
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-amber-400" />
+                  <span>Transparent Priority Assessment</span>
                 </h3>
                 <button
-                  onClick={() => setActiveTab('map')}
-                  className="font-mono text-xs text-cyan-400 hover:underline cursor-pointer"
+                  onClick={() => setPriorityModalOpen(true)}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-slate-950 font-mono text-xs font-bold rounded cursor-pointer"
                 >
-                  Expand Full Map
+                  Manual Override
                 </button>
               </div>
-              <MapComponent
-                cases={[caseData]}
-                sightings={sightings}
-                center={[
-                  caseData.person.lastKnownCoordinates.lat,
-                  caseData.person.lastKnownCoordinates.lng,
-                ]}
-                height="280px"
-              />
+
+              {priorityDetails && (
+                <div className="space-y-4 text-xs font-mono">
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-500">Calculated Protocol Priority:</span>{' '}
+                      <span className="font-bold text-slate-200">{priorityDetails.calculatedPriority}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Current Assigned:</span>{' '}
+                      <span className="font-bold text-amber-400">{priorityDetails.currentPriority}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-mono font-bold text-slate-300 uppercase">Assessment Factors & Rationale</h4>
+                    {priorityDetails.reasons.map((r, idx) => (
+                      <div key={idx} className="p-3 bg-slate-950 border border-slate-800 rounded space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-200">{r.code}</span>
+                          <span className="text-amber-400 text-[10px] uppercase">{r.impact} Impact</span>
+                        </div>
+                        <p className="text-slate-400 font-sans">{r.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab 2: Reports & Tips */}
-      {activeTab === 'reports' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200">
-              Submitted Sighting Reports ({reports.length})
-            </h3>
-          </div>
+        {/* TAB 3: LEADS BOARD */}
+        {activeTab === 'leads' && (
+          <LeadBoard
+            caseId={caseId}
+            leads={leads}
+            onRefresh={loadCaseData}
+            onOpenCreateModal={() => setLeadModalOpen(true)}
+          />
+        )}
 
-          {reports.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 font-mono text-xs">
-              No sighting reports have been submitted for this case yet.
+        {/* TAB 4: REPORTS & SIGHTINGS */}
+        {activeTab === 'reports' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100">All Sighting Reports ({reports.length})</h3>
             </div>
-          ) : (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {reports.map((r) => (
-                <div
-                  key={r.id}
-                  className="p-4 rounded-lg bg-slate-900 border border-slate-800 space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-cyan-400">{r.id}</span>
-                      <StatusBadge status={r.verificationStatus} size="sm" />
-                      <span className="text-slate-400 font-mono text-xs">
-                        Source: {r.source} ({r.reporterType})
-                      </span>
-                    </div>
-
-                    {isOfficerOrAdmin && (
-                      <button
-                        onClick={() => setSelectedReportForVerify(r)}
-                        className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold uppercase rounded cursor-pointer"
-                      >
-                        Verification Desk
-                      </button>
-                    )}
+                <div key={r.id} className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-bold text-cyan-400">{r.id}</span>
+                    <span className="text-slate-400">{r.verificationStatus}</span>
                   </div>
-
-                  <p className="text-slate-200 text-xs leading-relaxed bg-slate-950 p-3 rounded border border-slate-800/80">
-                    "{r.description}"
-                  </p>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-400 pt-2 border-t border-slate-800/60">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-3.5 w-3.5 text-rose-400" />
-                      <span>{r.location}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-3.5 w-3.5 text-slate-500" />
-                      <span>{r.date} at {r.time}</span>
-                    </div>
+                  <div className="font-bold text-slate-200">{r.location}</div>
+                  <p className="text-slate-300">{r.description}</p>
+                  <div className="text-[11px] text-slate-500 font-mono pt-2 border-t border-slate-800 flex items-center justify-between">
+                    <span>Source: {r.source} ({r.reporterName})</span>
+                    <span>{r.date} {r.time}</span>
                   </div>
-
-                  {r.verificationNotes && (
-                    <div className="p-2.5 rounded bg-slate-950/60 border border-slate-800 text-[11px] text-slate-300">
-                      <span className="font-semibold text-cyan-400">Review Notes: </span>
-                      <span>{r.verificationNotes}</span>
-                      {r.assignedReviewerName && (
-                        <span className="text-slate-500 ml-2">({r.assignedReviewerName})</span>
-                      )}
-                    </div>
+                  {r.verificationStatus !== 'Verified' && (
+                    <button
+                      onClick={() => setSelectedReportForVerify(r)}
+                      className="mt-2 w-full py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold font-mono text-xs rounded cursor-pointer"
+                    >
+                      Verify / Action Report
+                    </button>
                   )}
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab 3: Geographic Map */}
-      {activeTab === 'map' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200">
-              Interactive Incident Sighting Trail ({sightings.length} sightings mapped)
-            </h3>
           </div>
-          <MapComponent
-            cases={[caseData]}
-            sightings={sightings}
-            center={[
-              caseData.person.lastKnownCoordinates.lat,
-              caseData.person.lastKnownCoordinates.lng,
-            ]}
-            height="560px"
-          />
-        </div>
-      )}
+        )}
 
-      {/* Tab 4: Chronological Timeline */}
-      {activeTab === 'timeline' && (
-        <div className="space-y-4">
-          <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200 border-b border-slate-800 pb-2">
-            Incident Chronology & Investigation Log
-          </h3>
-
-          <div className="relative border-l border-slate-800 ml-4 space-y-6 py-2">
-            {timeline.map((event) => (
-              <div key={event.id} className="relative pl-6">
-                <span className="absolute -left-1.5 top-1.5 h-3 w-3 rounded-full border-2 border-slate-950 bg-cyan-400 ring-2 ring-cyan-500/30" />
-                <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-slate-100">{event.title}</span>
-                    <span className="font-mono text-[10px] text-slate-500">
-                      {new Date(event.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">{event.description}</p>
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1">
-                    <span>Officer/Source: {event.user} ({event.source})</span>
-                    {event.statusBadge && <StatusBadge status={event.statusBadge} size="sm" />}
-                  </div>
+        {/* TAB 5: MAP & LOCATION STORY */}
+        {activeTab === 'map' && (
+          <div className="space-y-6">
+            {/* Distance Calculator */}
+            <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+              <div>
+                <div className="font-bold text-slate-100 flex items-center gap-2 font-mono">
+                  <Compass className="h-4 w-4 text-cyan-400" />
+                  <span>Distance & Travel Time from Authorized Current Location</span>
                 </div>
+                <p className="text-slate-400 text-[11px] mt-0.5">
+                  Only calculates after explicit browser permission. Distance from current officer location to last known disappearance location.
+                </p>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 5: Evidence Locker */}
-      {activeTab === 'photos' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200">
-              Evidence Locker & Media Files ({files.length})
-            </h3>
-            <button
-              onClick={() => setPhotoModalOpen(true)}
-              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold uppercase rounded cursor-pointer"
-            >
-              + Ingest Media
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {files.map((f) => (
-              <div
-                key={f.id}
-                className="group rounded-lg bg-slate-900 border border-slate-800 overflow-hidden shadow"
-              >
-                <div className="h-36 bg-slate-950 overflow-hidden">
-                  <img
-                    src={f.url}
-                    alt={f.originalName}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                  />
-                </div>
-                <div className="p-3 text-xs space-y-1">
-                  <div className="font-semibold text-slate-200 truncate">{f.originalName}</div>
-                  <div className="text-[10px] font-mono text-slate-400">
-                    {(f.sizeBytes / 1024).toFixed(0)} KB • {f.mimeType}
-                  </div>
-                  <div className="text-[10px] text-slate-500">By: {f.uploadedBy}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 6: Investigation Tasks */}
-      {activeTab === 'tasks' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200">
-              Assigned Investigation Tasks ({tasks.length})
-            </h3>
-            {isOfficerOrAdmin && (
               <button
-                onClick={() => setTaskModalOpen(true)}
-                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold uppercase rounded cursor-pointer"
+                disabled={calcDistanceLoading}
+                onClick={handleCalculateDistanceToLastKnown}
+                className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold rounded cursor-pointer whitespace-nowrap"
               >
-                + Dispatch Task
+                {calcDistanceLoading ? 'Calculating...' : 'Calculate Distance'}
               </button>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            {tasks.map((t) => (
-              <div
-                key={t.id}
-                className="p-4 rounded-lg bg-slate-900 border border-slate-800 space-y-2 text-xs"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-cyan-400">{t.id}</span>
-                    <h4 className="font-semibold text-slate-100">{t.title}</h4>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <PriorityBadge priority={t.priority} />
-                    <StatusBadge status={t.status} size="sm" />
-                  </div>
-                </div>
-
-                <p className="text-slate-300 leading-relaxed">{t.description}</p>
-
-                <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-800/60">
-                  <span>Assigned: {t.assignedOfficerName}</span>
-                  <span>Due: {new Date(t.dueDate).toLocaleDateString()}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 7: AI Correlation Sandbox */}
-      {activeTab === 'ai' && (
-        <div className="space-y-5">
-          <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/30 space-y-4">
-            <div>
-              <div className="flex items-center gap-2 text-indigo-400 font-mono font-bold text-xs uppercase tracking-wider">
-                <Sparkles className="h-4 w-4" />
-                AI Description Correlation Workspace
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Evaluate citizen text tips or witness statements against this subject profile using server-side Gemini intelligence.
-              </p>
             </div>
 
-            <div className="space-y-2">
-              <label className="block text-slate-300 font-medium text-xs">
-                Witness or Sighting Statement to Evaluate:
-              </label>
-              <textarea
-                rows={3}
-                placeholder="e.g. A young woman wearing a dark blue hoodie and yellow backpack was spotted near the tram stop asking for directions around 4pm..."
-                value={customSightingText}
-                onChange={(e) => setCustomSightingText(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-slate-100 text-xs focus:border-indigo-500 focus:outline-none"
+            {distanceResult && (
+              <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 text-xs font-mono space-y-1">
+                <div className="font-bold text-cyan-300">Distance Result</div>
+                <div className="text-slate-200">Straight-line: {distanceResult.straightLineDistanceKm} km</div>
+                {distanceResult.directionsUrl && (
+                  <a
+                    href={distanceResult.directionsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-cyan-400 hover:underline flex items-center gap-1 pt-1"
+                  >
+                    <span>Open Google Directions</span>
+                    <ChevronRight className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Map Canvas */}
+            <div className="h-96 rounded-xl overflow-hidden border border-slate-800">
+              <MapComponent
+                locations={locations}
+                onSelectLocation={() => {}}
               />
             </div>
 
-            <button
-              onClick={handleRunAiMatch}
-              disabled={aiMatchLoading || !customSightingText.trim()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold rounded cursor-pointer transition-colors disabled:opacity-50"
-            >
-              {aiMatchLoading ? 'Analyzing Alignment...' : 'Execute Correlation Assessment'}
-            </button>
-
-            {aiMatchAnalysis && (
-              <div className="mt-4 p-4 rounded-lg bg-slate-950 border border-indigo-900/60 space-y-3 text-xs">
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-slate-300 font-semibold">Match Probability:</span>
-                  <span className="font-mono font-bold text-indigo-300 bg-indigo-950 px-2 py-0.5 rounded border border-indigo-800">
-                    {aiMatchAnalysis.matchConfidence} ({aiMatchAnalysis.similarityPercentage}%)
-                  </span>
-                </div>
-
-                <p className="text-slate-200 leading-relaxed">{aiMatchAnalysis.reasoning}</p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[11px]">
-                  <div className="p-2.5 rounded bg-slate-900 border border-slate-800">
-                    <span className="text-emerald-400 font-semibold block mb-1">
-                      Matched Characteristics:
-                    </span>
-                    <ul className="list-disc list-inside text-slate-300 space-y-0.5">
-                      {aiMatchAnalysis.matchedFeatures.map((f, i) => (
-                        <li key={i}>{f}</li>
-                      ))}
-                    </ul>
+            {/* Location Story Timeline */}
+            <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-3">
+              <h3 className="text-xs font-mono font-bold text-slate-200 uppercase">Location Story Sequence</h3>
+              <div className="space-y-3 border-l-2 border-cyan-500/40 ml-2 pl-4">
+                {locations.map((loc, idx) => (
+                  <div key={idx} className="space-y-1 text-xs">
+                    <div className="font-mono text-[10px] text-cyan-400 font-bold">{new Date(loc.timestamp).toLocaleString()}</div>
+                    <div className="font-bold text-slate-100">{loc.locationType}: {loc.locationName}</div>
+                    <div className="text-slate-400 text-[11px]">Source: {loc.source}</div>
                   </div>
-
-                  <div className="p-2.5 rounded bg-slate-900 border border-slate-800">
-                    <span className="text-amber-400 font-semibold block mb-1">
-                      Divergent Features / Gaps:
-                    </span>
-                    <ul className="list-disc list-inside text-slate-400 space-y-0.5">
-                      {aiMatchAnalysis.divergentFeatures.map((d, i) => (
-                        <li key={i}>{d}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="p-2 rounded bg-amber-950/40 border border-amber-800/40 font-mono text-[10px] text-amber-300">
-                  ⚠️ {aiMatchAnalysis.humanReviewDisclaimer}
-                </div>
+                ))}
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab 8: Audit Trail */}
-      {activeTab === 'audit' && (
-        <div className="space-y-4">
-          <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-200 border-b border-slate-800 pb-2">
-            Status Transition History & Tamper-Evident Record
-          </h3>
+        {/* TAB 6: TIMELINE */}
+        {activeTab === 'timeline' && (
+          <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 space-y-4">
+            <h3 className="text-xs font-mono font-bold text-slate-200 uppercase">Chronological Audit Timeline</h3>
+            <div className="space-y-3">
+              {timeline.map((ev) => (
+                <div key={ev.id} className="p-3 bg-slate-950 border border-slate-800 rounded text-xs space-y-1">
+                  <div className="flex items-center justify-between font-mono text-[10px]">
+                    <span className="font-bold text-cyan-400">{ev.title}</span>
+                    <span className="text-slate-500">{new Date(ev.timestamp).toLocaleString()}</span>
+                  </div>
+                  <p className="text-slate-300">{ev.description}</p>
+                  <div className="text-[10px] font-mono text-slate-500">By {ev.user} ({ev.source})</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-          <div className="space-y-3">
-            {caseData.statusHistory.map((h, i) => (
-              <div
-                key={i}
-                className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1.5"
+        {/* TAB 7: EVIDENCE VAULT */}
+        {activeTab === 'photos' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100">Evidence Media Locker ({files.length})</h3>
+              <button
+                onClick={() => setPhotoModalOpen(true)}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-mono">
-                    <span className="text-slate-400">{h.fromStatus}</span>
-                    <span className="text-slate-600">→</span>
-                    <span className="text-cyan-400 font-bold">{h.toStatus}</span>
+                <Camera className="h-3.5 w-3.5" />
+                <span>Upload Media</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {files.map((f) => (
+                <div key={f.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2 text-xs">
+                  <img src={f.url} alt={f.originalName} className="h-36 w-full object-cover rounded border border-slate-800" />
+                  <div className="font-semibold text-slate-200 truncate">{f.originalName}</div>
+                  <button
+                    onClick={() => setSelectedFileForAudit(f)}
+                    className="w-full py-1 bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono text-[10px] rounded cursor-pointer"
+                  >
+                    View Audit Trail
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 8: TASKS */}
+        {activeTab === 'tasks' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100">Investigation Tasks ({tasks.length})</h3>
+              <button
+                onClick={() => setTaskModalOpen(true)}
+                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-semibold text-xs rounded flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Create Task</span>
+              </button>
+            </div>
+            <div className="space-y-2">
+              {tasks.map((t) => (
+                <div key={t.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-bold text-slate-200">{t.title}</span>
+                    <span className="text-amber-400">{t.priority}</span>
                   </div>
-                  <span className="font-mono text-[11px] text-slate-500">
-                    {new Date(h.timestamp).toLocaleString()}
-                  </span>
+                  <p className="text-slate-300">{t.description}</p>
+                  <div className="text-[10px] font-mono text-slate-500">Assigned: {t.assignedOfficerName} | Status: {t.status}</div>
                 </div>
-                <div className="text-slate-300">
-                  <strong className="text-slate-400">Justification: </strong>
-                  {h.reason}
-                </div>
-                <div className="text-[11px] font-mono text-slate-500">Authorized by: {h.changedBy}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 9: AI ASSISTANT */}
+        {activeTab === 'ai' && (
+          <div className="space-y-6">
+            <div className="p-4 rounded-xl border border-cyan-500/30 bg-slate-900/60 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-cyan-400" />
+                  <span>AI Sighting Description Comparison & Similarity Sandbox</span>
+                </h3>
               </div>
-            ))}
+
+              <div className="space-y-3">
+                <textarea
+                  value={customSightingText}
+                  onChange={(e) => setCustomSightingText(e.target.value)}
+                  rows={3}
+                  placeholder="Paste sighting description text to compare against missing person profile..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-3 text-xs text-slate-100 focus:border-cyan-500 outline-none resize-none font-mono"
+                />
+                <button
+                  disabled={aiMatchLoading}
+                  onClick={handleRunAiMatch}
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold rounded cursor-pointer"
+                >
+                  {aiMatchLoading ? 'Analyzing...' : 'Run Description Comparison'}
+                </button>
+
+                {aiMatchAnalysis && (
+                  <div className="p-4 bg-slate-950 border border-cyan-500/30 rounded-lg text-xs space-y-2 font-mono">
+                    <div className="text-cyan-300 font-bold">
+                      Match Confidence: {aiMatchAnalysis.matchConfidence} ({aiMatchAnalysis.similarityPercentage}%)
+                    </div>
+                    <div className="text-emerald-400">✓ Matching: {aiMatchAnalysis.matchedFeatures.join(', ')}</div>
+                    <div className="text-amber-400">⚠ Differences: {aiMatchAnalysis.divergentFeatures.join(', ')}</div>
+                    <p className="text-slate-300 font-sans">{aiMatchAnalysis.reasoning}</p>
+                    <div className="text-[10px] text-slate-500 italic border-t border-slate-800 pt-1">
+                      {aiMatchAnalysis.humanReviewDisclaimer}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODALS */}
+      {/* Priority Override Modal */}
+      {priorityModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-100">Manual Priority Override</h3>
+            <form onSubmit={handlePriorityOverrideSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">New Priority</label>
+                <select
+                  value={overridePriority}
+                  onChange={(e) => setOverridePriority(e.target.value as PriorityLevel)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-100"
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                  <option value="Urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Justification Reason *</label>
+                <textarea
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-100 resize-none"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setPriorityModalOpen(false)} className="px-3 py-1.5 bg-slate-800 text-xs text-slate-300 rounded">
+                  Cancel
+                </button>
+                <button type="submit" className="px-3 py-1.5 bg-amber-600 text-xs text-slate-950 font-bold rounded">
+                  Save Priority Override
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Status Transition Modal */}
+      {/* Change Status Modal */}
       {statusModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 shadow-2xl">
-            <h3 className="font-mono text-sm font-bold uppercase text-slate-100">
-              Update Case Operational Status
-            </h3>
-            <form onSubmit={handleUpdateStatus} className="space-y-3 text-xs">
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-100">Change Case Operational Status</h3>
+            <form onSubmit={handleStatusChangeSubmit} className="space-y-3">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">New Status</label>
+                <label className="block text-xs text-slate-300 mb-1">New Operational Status</label>
                 <select
                   value={newStatus}
                   onChange={(e) => setNewStatus(e.target.value as CaseStatus)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-100"
                 >
                   <option value="Active">Active</option>
                   <option value="Under Investigation">Under Investigation</option>
@@ -773,35 +1039,22 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
                   <option value="Closed">Closed</option>
                 </select>
               </div>
-
               <div>
-                <label className="block text-slate-300 font-medium mb-1">
-                  Mandatory Operational Justification *
-                </label>
+                <label className="block text-xs text-slate-300 mb-1">Audit Rationale Reason *</label>
                 <textarea
-                  rows={3}
-                  required
-                  placeholder="Record verification details, corroborating officer, or search milestone..."
                   value={statusReason}
                   onChange={(e) => setStatusReason(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-slate-100 focus:border-cyan-500 focus:outline-none"
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-100 resize-none"
+                  required
                 />
               </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setStatusModalOpen(false)}
-                  className="px-4 py-2 text-slate-400 hover:text-slate-200 cursor-pointer"
-                >
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setStatusModalOpen(false)} className="px-3 py-1.5 bg-slate-800 text-xs text-slate-300 rounded">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={statusSubmitting}
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono font-bold uppercase rounded cursor-pointer disabled:opacity-50"
-                >
-                  {statusSubmitting ? 'Recording...' : 'Confirm Transition'}
+                <button type="submit" className="px-3 py-1.5 bg-cyan-600 text-xs text-slate-950 font-bold rounded">
+                  Update Case Status
                 </button>
               </div>
             </form>
@@ -809,37 +1062,20 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
         </div>
       )}
 
-      {/* Auxiliary Modals */}
-      <AiSummaryModal
-        targetCase={caseData}
-        isOpen={aiSummaryModalOpen}
-        onClose={() => setAiSummaryModalOpen(false)}
-      />
-
-      <CreateTaskModal
-        caseId={caseData.id}
-        caseTitle={caseData.title}
-        isOpen={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
-        onTaskCreated={(t) => setTasks([t, ...tasks])}
-      />
-
-      <UploadPhotoModal
-        caseId={caseData.id}
-        isOpen={photoModalOpen}
-        onClose={() => setPhotoModalOpen(false)}
-        onPhotoUploaded={(f) => setFiles([f, ...files])}
-      />
+      {/* Child Modals */}
+      <CreateTaskModal isOpen={taskModalOpen} onClose={() => setTaskModalOpen(false)} caseId={caseId} onTaskCreated={loadCaseData} />
+      <CreateLeadModal isOpen={leadModalOpen} onClose={() => setLeadModalOpen(false)} caseId={caseId} onLeadCreated={loadCaseData} />
+      <UploadPhotoModal isOpen={photoModalOpen} onClose={() => setPhotoModalOpen(false)} caseId={caseId} onPhotoUploaded={loadCaseData} />
+      <CaseClosureModal isOpen={closureModalOpen} onClose={() => setClosureModalOpen(false)} caseId={caseId} onCaseClosed={loadCaseData} />
+      <PrintableCaseReportModal isOpen={reportPdfModalOpen} onClose={() => setReportPdfModalOpen(false)} caseId={caseId} />
+      <EvidenceAuditModal isOpen={!!selectedFileForAudit} onClose={() => setSelectedFileForAudit(null)} file={selectedFileForAudit} caseId={caseId} />
 
       {selectedReportForVerify && (
         <VerifyReportModal
-          report={selectedReportForVerify}
-          linkedCase={caseData}
           isOpen={!!selectedReportForVerify}
           onClose={() => setSelectedReportForVerify(null)}
-          onReportUpdated={(updated) => {
-            setReports(reports.map((r) => (r.id === updated.id ? updated : r)));
-          }}
+          report={selectedReportForVerify}
+          onReportVerified={loadCaseData}
         />
       )}
     </div>

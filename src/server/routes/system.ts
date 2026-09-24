@@ -129,6 +129,132 @@ systemRouter.get(
   }
 );
 
+// GET What Changed Since Last Login
+systemRouter.get(
+  '/what-changed',
+  requireAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    const user = req.user!;
+    const summary = db.getWhatChangedForUser(user.id);
+    res.json(summary);
+  }
+);
+
+// GET Senior Officer Command Dashboard
+systemRouter.get(
+  '/senior-dashboard',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const data = db.getSeniorOfficerDashboardData();
+    res.json(data);
+  }
+);
+
+// GET Stale Cases & Threshold Configuration
+systemRouter.get(
+  '/stale-cases',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const hours = req.query.threshold ? Number(req.query.threshold) : db.getStaleThresholdHours();
+    const staleCases = db.getStaleCases(hours);
+    res.json({
+      thresholdHours: hours,
+      count: staleCases.length,
+      staleCases,
+    });
+  }
+);
+
+systemRouter.post(
+  '/stale-threshold',
+  requireAuth,
+  requireRole(['SUPER_ADMIN']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { hours } = req.body;
+    if (!hours || isNaN(Number(hours)) || Number(hours) < 1) {
+      res.status(400).json({ error: 'Valid threshold hours required.' });
+      return;
+    }
+    const updated = db.setStaleThresholdHours(Number(hours));
+    res.json({ thresholdHours: updated });
+  }
+);
+
+// Global Search (Search across Cases, Reports, Sightings, Leads, Tasks with RBAC)
+systemRouter.get(
+  '/search',
+  requireAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+    if (!q) {
+      res.json({ cases: [], reports: [], sightings: [], leads: [], tasks: [] });
+      return;
+    }
+
+    const user = req.user!;
+    const isCitizen = user.role === 'CITIZEN';
+
+    const cases = db.getAllCases()
+      .filter(
+        (c) =>
+          c.id.toLowerCase().includes(q) ||
+          c.person.fullName.toLowerCase().includes(q) ||
+          c.person.lastKnownLocation.toLowerCase().includes(q) ||
+          c.person.identifyingMarks.toLowerCase().includes(q)
+      )
+      .map((c) => (isCitizen ? { ...c, internalNotes: undefined } : c));
+
+    const reports = db.getAllReports()
+      .filter(
+        (r) =>
+          r.id.toLowerCase().includes(q) ||
+          r.location.toLowerCase().includes(q) ||
+          r.description.toLowerCase().includes(q) ||
+          r.reporterName.toLowerCase().includes(q)
+      )
+      .map((r) => (isCitizen ? { ...r, verificationNotes: undefined, reporterContact: undefined } : r));
+
+    const sightings = db.getAllSightings().filter(
+      (s) =>
+        s.id.toLowerCase().includes(q) ||
+        s.location.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q)
+    );
+
+    const leads = isCitizen
+      ? []
+      : db.getAllLeads().filter(
+          (l) =>
+            l.id.toLowerCase().includes(q) ||
+            l.title.toLowerCase().includes(q) ||
+            l.description.toLowerCase().includes(q) ||
+            (l.assignedOfficerName && l.assignedOfficerName.toLowerCase().includes(q))
+        );
+
+    const tasks = isCitizen
+      ? []
+      : db.getAllTasks().filter(
+          (t) =>
+            t.id.toLowerCase().includes(q) ||
+            t.title.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            t.assignedOfficerName.toLowerCase().includes(q)
+        );
+
+    res.json({
+      query: q,
+      totalCount: cases.length + reports.length + sightings.length + leads.length + tasks.length,
+      cases,
+      reports,
+      sightings,
+      leads,
+      tasks,
+    });
+  }
+);
+
 // Health & Readiness Observability
 systemRouter.get('/health', (req: Request, res: Response) => {
   res.status(200).json({
@@ -148,3 +274,4 @@ systemRouter.get('/ready', (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 });
+

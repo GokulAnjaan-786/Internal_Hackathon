@@ -372,5 +372,132 @@ export const api = {
 
   getCurrentLocation: () =>
     request<UserCurrentLocation>('/api/location/current'),
+
+  // ----------------------------------------------------
+  // INVESTIGATION WORKSPACE EXTENSIONS
+  // ----------------------------------------------------
+
+  // Leads
+  getLeads: (params?: { caseId?: string; status?: string; priority?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.caseId) q.append('caseId', params.caseId);
+    if (params?.status) q.append('status', params.status);
+    if (params?.priority) q.append('priority', params.priority);
+    return request<{ total: number; leads: any[] }>(`/api/leads?${q.toString()}`);
+  },
+
+  getLeadById: (id: string) => request<any>(`/api/leads/${id}`),
+
+  createLead: (data: any) =>
+    request<any>('/api/leads', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateLead: (id: string, updates: any) =>
+    request<any>(`/api/leads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
+
+  // Case at a Glance
+  getCaseAtAGlance: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/at-a-glance`),
+
+  // Case Completeness
+  getCaseCompleteness: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/completeness`),
+
+  updateMissingInfoStatus: (caseId: string, itemId: string, status: string, notes?: string) =>
+    request<any>(`/api/cases/${caseId}/completeness/${itemId}`, {
+      method: 'POST',
+      body: JSON.stringify({ status, notes }),
+    }),
+
+  // Case Priority
+  getCasePriorityDetails: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/priority-details`),
+
+  overrideCasePriority: (caseId: string, priority: string, reason: string) =>
+    request<any>(`/api/cases/${caseId}/priority-override`, {
+      method: 'POST',
+      body: JSON.stringify({ priority, reason }),
+    }),
+
+  // What Changed
+  getWhatChanged: () => request<any>('/api/what-changed'),
+
+  // Senior Dashboard & Stale Cases
+  getSeniorOfficerDashboard: () => request<any>('/api/senior-dashboard'),
+
+  getStaleCases: (threshold?: number) => {
+    const q = threshold ? `?threshold=${threshold}` : '';
+    return request<any>(`/api/stale-cases${q}`);
+  },
+
+  setStaleThreshold: (hours: number) =>
+    request<any>('/api/stale-threshold', {
+      method: 'POST',
+      body: JSON.stringify({ hours }),
+    }),
+
+  // Search
+  globalSearch: (q: string) =>
+    request<any>(`/api/search?q=${encodeURIComponent(q)}`),
+
+  // Conflicts
+  getCaseConflicts: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/conflicts`),
+
+  resolveConflict: (caseId: string, conflictId: string, resolutionNotes?: string) =>
+    request<any>(`/api/cases/${caseId}/conflicts/${conflictId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolutionNotes }),
+    }),
+
+  // AI Next Actions
+  getAiNextActions: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/next-actions`),
+
+  updateAiNextActionStatus: (caseId: string, actionId: string, status: 'ACCEPTED' | 'DISMISSED') =>
+    request<any>(`/api/cases/${caseId}/next-actions/${actionId}`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+
+  // Related Cases
+  getPotentialRelatedCases: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/related-cases`),
+
+  // Case Closure
+  getCaseClosureChecklist: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/closure-checklist`),
+
+  updateCaseClosureChecklist: (caseId: string, updates: any) =>
+    request<any>(`/api/cases/${caseId}/closure-checklist`, {
+      method: 'POST',
+      body: JSON.stringify(updates),
+    }),
+
+  closeCase: (caseId: string, closureReason: string) =>
+    request<any>(`/api/cases/${caseId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ closureReason }),
+    }),
+
+  // Case Report PDF Data
+  getCaseReportPdfData: (caseId: string) =>
+    request<any>(`/api/cases/${caseId}/report-pdf`),
+
+  // Evidence Audit
+  getEvidenceAuditHistory: (caseId: string, fileId: string) =>
+    request<any>(`/api/cases/${caseId}/evidence/${fileId}/audit`),
+
+  logEvidenceAudit: (caseId: string, fileId: string, action: string, notes?: string) =>
+    request<any>(`/api/cases/${caseId}/evidence/${fileId}/audit`, {
+      method: 'POST',
+      body: JSON.stringify({ action, notes }),
+    }),
 };
+
 

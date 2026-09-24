@@ -7,7 +7,7 @@ import {
   ChevronDown,
   Plus,
   Radio,
-  FileSearch,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { UserRole } from '../types/index.ts';
@@ -16,6 +16,7 @@ interface NavbarProps {
   onOpenNewCase?: () => void;
   onOpenNotifications?: () => void;
   onOpenSearch?: () => void;
+  onOpenWhatChanged?: () => void;
   unreadCount?: number;
 }
 
@@ -23,6 +24,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenNewCase,
   onOpenNotifications,
   onOpenSearch,
+  onOpenWhatChanged,
   unreadCount = 0,
 }) => {
   const { user, role, demoSwitch } = useAuth();
@@ -54,28 +56,40 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-bold tracking-wider text-slate-100 uppercase">
-                Missing Person Case Organiser
+                Missing Person Case Management
               </span>
               <span className="inline-flex items-center gap-1 font-mono text-[10px] text-emerald-400 border border-emerald-500/30 bg-emerald-950/40 px-1.5 py-0.5 rounded">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                OPS ROOM ACTIVE
+                COMMAND ACTIVE
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block">
-              Privacy-Sensitive Emergency Response Platform • Multi-Agency RBAC
+              Privacy-Sensitive Investigation Workspace • Multi-Agency RBAC
             </p>
           </div>
         </div>
 
         {/* Global Search & Action Center */}
         <div className="flex items-center gap-3">
+          {/* What Changed Button */}
+          {onOpenWhatChanged && (
+            <button
+              onClick={onOpenWhatChanged}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono font-medium text-cyan-300 bg-cyan-950/50 border border-cyan-500/30 hover:bg-cyan-900/50 rounded transition-colors cursor-pointer"
+              title="What Changed Since Last Login"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+              <span className="hidden md:inline">What Changed?</span>
+            </button>
+          )}
+
           {/* Quick Search Button */}
           <button
             onClick={onOpenSearch}
             className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded hover:border-slate-700 hover:text-slate-200 transition-colors cursor-pointer"
           >
             <Search className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">Search cases, reports, IDs...</span>
+            <span className="hidden md:inline">Search cases, leads, reports...</span>
             <kbd className="hidden md:inline-block px-1.5 py-0.2 bg-slate-800 text-[10px] font-mono text-slate-400 rounded border border-slate-700">
               ⌘K
             </kbd>

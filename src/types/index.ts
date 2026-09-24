@@ -325,3 +325,156 @@ export interface UserCurrentLocation {
   updatedAt: string;
 }
 
+// ----------------------------------------------------
+// NEW INVESTIGATION WORKSPACE EXTENSIONS
+// ----------------------------------------------------
+
+export type LeadStatus =
+  | 'NEW'
+  | 'ASSIGNED'
+  | 'UNDER_INVESTIGATION'
+  | 'WAITING_FOR_RESPONSE'
+  | 'VERIFIED'
+  | 'NOT_USEFUL'
+  | 'CLOSED';
+
+export type LeadPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+
+export interface Lead {
+  id: string; // LED-2026-XXXXXX
+  caseId: string;
+  caseTitle?: string;
+  title: string;
+  description: string;
+  source: string;
+  priority: LeadPriority;
+  assignedOfficerId?: string;
+  assignedOfficerName?: string;
+  createdAt: string;
+  dueDate?: string;
+  status: LeadStatus;
+  evidence?: string[];
+  result?: string;
+  notes?: string;
+  updatedAt: string;
+}
+
+export type MissingInfoStatus =
+  | 'Required'
+  | 'Optional'
+  | 'Collected'
+  | 'Unavailable'
+  | 'NotApplicable';
+
+export interface MissingInfoItem {
+  id: string;
+  category: string;
+  label: string;
+  status: MissingInfoStatus;
+  notes?: string;
+}
+
+export interface CaseCompleteness {
+  personDetailsPercent: number;
+  reportInfoPercent: number;
+  locationDataPercent: number;
+  verificationPercent: number;
+  tasksPercent: number;
+  overallPercent: number;
+  missingItems: MissingInfoItem[];
+}
+
+export interface PriorityReason {
+  code: string;
+  label: string;
+  impact: 'High' | 'Medium' | 'Low';
+}
+
+export interface CasePriorityDetails {
+  calculatedPriority: PriorityLevel;
+  currentPriority: PriorityLevel;
+  isManualOverride: boolean;
+  overrideReason?: string;
+  overrideBy?: string;
+  overrideAt?: string;
+  reasons: PriorityReason[];
+}
+
+export interface ChangeItem {
+  id: string;
+  type: 'REPORT' | 'SIGHTING' | 'VERIFICATION' | 'TASK' | 'LEAD' | 'PHOTO' | 'STATUS_CHANGE';
+  title: string;
+  description: string;
+  timestamp: string;
+  caseId?: string;
+  recordId?: string;
+}
+
+export interface WhatChangedSummary {
+  sinceTimestamp: string;
+  newReportsCount: number;
+  newSightingsCount: number;
+  verifiedSightingsCount: number;
+  rejectedReportsCount: number;
+  completedTasksCount: number;
+  newPhotographsCount: number;
+  statusChangesCount: number;
+  newLeadsCount: number;
+  items: ChangeItem[];
+}
+
+export interface ConflictItem {
+  id: string;
+  caseId: string;
+  category: 'Clothing' | 'Age' | 'Time' | 'Location' | 'Vehicle' | 'Physical Description' | 'Direction' | 'Other';
+  conflictingValues: { reportId?: string; source: string; value: string; timestamp: string }[];
+  status: 'UNRESOLVED' | 'REVIEWED' | 'DISMISSED';
+  resolutionNotes?: string;
+}
+
+export interface AiNextActionSuggestion {
+  id: string;
+  caseId: string;
+  actionTitle: string;
+  description: string;
+  whySuggested: string;
+  priority: PriorityLevel;
+  status: 'PENDING' | 'ACCEPTED' | 'DISMISSED';
+  relatedLeadId?: string;
+  relatedTaskId?: string;
+}
+
+export interface PotentialRelatedCase {
+  id: string;
+  caseId: string;
+  targetCaseId: string;
+  targetCaseTitle: string;
+  targetPersonName: string;
+  similarityScore: number;
+  matchingReasons: string[];
+  status: 'PENDING' | 'REVIEWED' | 'DISMISSED';
+}
+
+export interface EvidenceAuditEntry {
+  action: 'UPLOADED' | 'VIEWED' | 'MODIFIED' | 'VERIFIED' | 'FLAGGED';
+  performedBy: string;
+  performedById: string;
+  role: UserRole;
+  timestamp: string;
+  notes?: string;
+}
+
+export interface CaseClosureChecklist {
+  identityConfirmed: boolean;
+  leadsReviewed: boolean;
+  tasksReviewed: boolean;
+  evidenceUpdated: boolean;
+  notesCompleted: boolean;
+  followupsCompleted: boolean;
+  closureReason: string;
+  closedBy?: string;
+  closedAt?: string;
+  finalReportGenerated: boolean;
+}
+
+

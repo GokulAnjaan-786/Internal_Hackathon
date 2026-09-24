@@ -10,6 +10,9 @@ import {
   Globe,
   Settings,
   Lock,
+  ShieldAlert,
+  Smartphone,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -40,10 +43,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: true,
     },
     {
+      id: 'senior-dashboard',
+      label: 'Senior Command Desk',
+      icon: ShieldAlert,
+      visible: isSuperAdmin || role === 'CASE_OFFICER',
+    },
+    {
       id: 'cases',
       label: 'Missing Person Cases',
       icon: FolderOpen,
       visible: true,
+    },
+    {
+      id: 'leads',
+      label: 'Investigation Leads Board',
+      icon: Sparkles,
+      visible: isOfficerOrVerifier,
     },
     {
       id: 'verification',
@@ -65,6 +80,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ListTodo,
       badge: openTasksCount > 0 ? openTasksCount : undefined,
       badgeColor: 'text-cyan-400 bg-cyan-950/60 border border-cyan-500/40',
+      visible: isOfficerOrVerifier,
+    },
+    {
+      id: 'field-mode',
+      label: 'Mobile Field Mode',
+      icon: Smartphone,
       visible: isOfficerOrVerifier,
     },
     {

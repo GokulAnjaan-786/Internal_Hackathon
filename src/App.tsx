@@ -3,16 +3,20 @@ import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { Navbar } from './components/Navbar.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
 import { DashboardPage } from './pages/DashboardPage.tsx';
+import { SeniorOfficerDashboardPage } from './pages/SeniorOfficerDashboardPage.tsx';
 import { CasesListPage } from './pages/CasesListPage.tsx';
 import { CaseDetailPage } from './pages/CaseDetailPage.tsx';
 import { VerificationPage } from './pages/VerificationPage.tsx';
 import { IncidentMapPage } from './pages/IncidentMapPage.tsx';
 import { TasksPage } from './pages/TasksPage.tsx';
+import { LeadsPage } from './pages/LeadsPage.tsx';
+import { FieldModePage } from './pages/FieldModePage.tsx';
 import { CitizenPortalPage } from './pages/CitizenPortalPage.tsx';
 import { AuditLogsPage } from './pages/AuditLogsPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { CreateCaseModal } from './components/CreateCaseModal.tsx';
 import { NotificationDrawer } from './components/NotificationDrawer.tsx';
+import { WhatChangedDrawer } from './components/WhatChangedDrawer.tsx';
 import { SearchModal } from './components/SearchModal.tsx';
 import { api } from './services/api.ts';
 import { NotificationItem, Case } from './types/index.ts';
@@ -27,6 +31,7 @@ function AppContent() {
   // Global Modals State
   const [createCaseModalOpen, setCreateCaseModalOpen] = useState(false);
   const [notificationDrawerOpen, setNotificationDrawerOpen] = useState(false);
+  const [whatChangedDrawerOpen, setWhatChangedDrawerOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   // Notifications & Badges
@@ -113,6 +118,7 @@ function AppContent() {
         onOpenNewCase={() => setCreateCaseModalOpen(true)}
         onOpenNotifications={() => setNotificationDrawerOpen(true)}
         onOpenSearch={() => setSearchModalOpen(true)}
+        onOpenWhatChanged={() => setWhatChangedDrawerOpen(true)}
         unreadCount={unreadNotificationsCount}
       />
 
@@ -146,11 +152,19 @@ function AppContent() {
                 />
               )}
 
+              {currentTab === 'senior-dashboard' && (
+                <SeniorOfficerDashboardPage onSelectCase={handleSelectCase} />
+              )}
+
               {currentTab === 'cases' && (
                 <CasesListPage
                   onSelectCase={handleSelectCase}
                   onOpenNewCase={() => setCreateCaseModalOpen(true)}
                 />
+              )}
+
+              {currentTab === 'leads' && (
+                <LeadsPage onSelectCase={handleSelectCase} />
               )}
 
               {currentTab === 'verification' && (
@@ -163,6 +177,10 @@ function AppContent() {
 
               {currentTab === 'tasks' && (
                 <TasksPage onSelectCase={handleSelectCase} />
+              )}
+
+              {currentTab === 'field-mode' && (
+                <FieldModePage onSelectCase={handleSelectCase} />
               )}
 
               {currentTab === 'citizen-portal' && <CitizenPortalPage />}
@@ -192,6 +210,12 @@ function AppContent() {
           setSelectedCaseId(id);
           setNotificationDrawerOpen(false);
         }}
+      />
+
+      <WhatChangedDrawer
+        isOpen={whatChangedDrawerOpen}
+        onClose={() => setWhatChangedDrawerOpen(false)}
+        onSelectCase={handleSelectCase}
       />
 
       <SearchModal

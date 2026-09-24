@@ -558,3 +558,297 @@ casesRouter.post(
     res.status(201).json(newFile);
   }
 );
+
+// GET Case At A Glance (30-60 second summary card data)
+casesRouter.get('/:id/at-a-glance', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const targetCase = db.getCaseById(id);
+  if (!targetCase) {
+    res.status(404).json({ error: `Case ${id} not found.` });
+    return;
+  }
+
+  const reports = db.getAllReports(id);
+  const sightings = db.getAllSightings(id);
+  const verifiedSightings = sightings.filter((s) => s.verificationStatus === 'Verified');
+  const underReviewReports = reports.filter((r) => r.verificationStatus === 'Under Review');
+  const leads = db.getAllLeads(id);
+  const openLeads = leads.filter((l) => l.status !== 'CLOSED' && l.status !== 'NOT_USEFUL');
+  const tasks = db.getAllTasks(id);
+  const openTasks = tasks.filter((t) => t.status !== 'Completed');
+
+  res.json({
+    caseId: targetCase.id,
+    title: targetCase.title,
+    person: targetCase.person,
+    priority: targetCase.priority,
+    status: targetCase.status,
+    assignedOfficerName: targetCase.assignedOfficerName,
+    leadAgency: targetCase.leadAgency,
+    createdAt: targetCase.createdAt,
+    updatedAt: targetCase.updatedAt,
+    counters: {
+      reportsCount: reports.length,
+      sightingsCount: sightings.length,
+      verifiedSightingsCount: verifiedSightings.length,
+      underReviewCount: underReviewReports.length,
+      openLeadsCount: openLeads.length,
+      openTasksCount: openTasks.length,
+    },
+  });
+});
+
+// GET & POST Case Completeness
+casesRouter.get('/:id/completeness', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const completeness = db.getCaseCompleteness(id);
+  res.json(completeness);
+});
+
+casesRouter.post(
+  '/:id/completeness/:itemId',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER', 'VERIFICATION_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id, itemId } = req.params;
+    const { status, notes } = req.body;
+
+    if (!status) {
+      res.status(400).json({ error: 'Status is required.' });
+      return;
+    }
+
+    const updated = db.updateMissingInfoStatus(id, itemId, status, notes);
+
+    db.addAuditLog({
+      userId: req.user!.id,
+      userName: req.user!.fullName,
+      userRole: req.user!.role,
+      action: 'CASE_COMPLETENESS_UPDATED',
+      resourceType: 'CASE',
+      resourceId: id,
+      details: `Updated missing information item "${itemId}" status to "${status}".`,
+      result: 'SUCCESS',
+    });
+
+    res.json(updated);
+  }
+);
+
+// GET Priority Rationale & Manual Override
+casesRouter.get('/:id/priority-details', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const details = db.getCasePriorityDetails(id);
+  res.json(details);
+});
+
+casesRouter.post(
+  '/:id/priority-override',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { priority, reason } = req.body;
+
+    if (!priority || !reason || !reason.trim()) {
+      res.status(400).json({ error: 'Both new priority level and justification reason are required.' });
+      return;
+    }
+
+    const user = req.user!;
+    const updated = db.overrideCasePriority(id, priority, reason.trim(), user.fullName, user.id);
+    res.json(updated);
+  }
+);
+
+// GET & Resolve Conflicts
+casesRouter.get('/:id/conflicts', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const conflicts = db.getCaseConflicts(id);
+  res.json({ caseId: id, conflicts });
+});
+
+casesRouter.post(
+  '/:id/conflicts/:conflictId/resolve',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER', 'VERIFICATION_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id, conflictId } = req.params;
+    const { resolutionNotes } = req.body;
+
+    const resolved = db.resolveConflict(id, conflictId, resolutionNotes || 'Reviewed and dismissed by officer.');
+    if (!resolved) {
+      res.status(404).json({ error: `Conflict item ${conflictId} not found for case ${id}.` });
+      return;
+    }
+
+    db.addAuditLog({
+      userId: req.user!.id,
+      userName: req.user!.fullName,
+      userRole: req.user!.role,
+      action: 'CONFLICT_RESOLVED',
+      resourceType: 'CASE',
+      resourceId: id,
+      details: `Resolved conflict ${conflictId}. Notes: ${resolutionNotes || 'Dismissed'}`,
+      result: 'SUCCESS',
+    });
+
+    res.json(resolved);
+  }
+);
+
+// AI Next Actions
+casesRouter.get('/:id/next-actions', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const actions = db.getAiNextActions(id);
+  res.json({ caseId: id, actions });
+});
+
+casesRouter.post(
+  '/:id/next-actions/:actionId',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id, actionId } = req.params;
+    const { status } = req.body as { status: 'ACCEPTED' | 'DISMISSED' };
+
+    if (!status || (status !== 'ACCEPTED' && status !== 'DISMISSED')) {
+      res.status(400).json({ error: 'Status must be ACCEPTED or DISMISSED.' });
+      return;
+    }
+
+    const user = req.user!;
+    const updated = db.updateAiNextActionStatus(id, actionId, status, user.fullName, user.id);
+    if (!updated) {
+      res.status(404).json({ error: `Action ${actionId} not found.` });
+      return;
+    }
+
+    db.addAuditLog({
+      userId: user.id,
+      userName: user.fullName,
+      userRole: user.role,
+      action: status === 'ACCEPTED' ? 'AI_ACTION_ACCEPTED' : 'AI_ACTION_DISMISSED',
+      resourceType: 'CASE',
+      resourceId: id,
+      details: `${status} AI action recommendation "${updated.actionTitle}".`,
+      result: 'SUCCESS',
+    });
+
+    res.json(updated);
+  }
+);
+
+// Cross-Case Connections
+casesRouter.get('/:id/related-cases', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const related = db.getPotentialRelatedCases(id);
+  res.json({ caseId: id, relatedCases: related });
+});
+
+// Case Closure Checklist & Final Closure
+casesRouter.get('/:id/closure-checklist', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const checklist = db.getCaseClosureChecklist(id);
+  res.json(checklist);
+});
+
+casesRouter.post(
+  '/:id/closure-checklist',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const updates = req.body;
+    const updated = db.updateCaseClosureChecklist(id, updates);
+    res.json(updated);
+  }
+);
+
+casesRouter.post(
+  '/:id/close',
+  requireAuth,
+  requireRole(['SUPER_ADMIN', 'CASE_OFFICER']),
+  (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { closureReason } = req.body;
+
+    if (!closureReason || !closureReason.trim()) {
+      res.status(400).json({ error: 'A formal closure justification reason is required.' });
+      return;
+    }
+
+    const user = req.user!;
+    const closed = db.closeCase(id, closureReason.trim(), user.fullName, user.id);
+    if (!closed) {
+      res.status(404).json({ error: `Case ${id} not found.` });
+      return;
+    }
+
+    res.json(closed);
+  }
+);
+
+// Printable Case Report PDF Structure
+casesRouter.get('/:id/report-pdf', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const targetCase = db.getCaseById(id);
+  if (!targetCase) {
+    res.status(404).json({ error: `Case ${id} not found.` });
+    return;
+  }
+
+  const reports = db.getAllReports(id);
+  const sightings = db.getAllSightings(id);
+  const leads = db.getAllLeads(id);
+  const tasks = db.getAllTasks(id);
+  const timeline = db.getTimelineEvents(id);
+  const files = db.getFilesByCaseId(id);
+  const locations = db.getCaseLocations(id);
+  const completeness = db.getCaseCompleteness(id);
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    caseDetails: targetCase,
+    personDetails: targetCase.person,
+    completeness,
+    summary: targetCase.summary || 'Official situation report.',
+    reports,
+    sightings,
+    leads,
+    tasks,
+    timeline,
+    evidenceFiles: files,
+    locations,
+    statusHistory: targetCase.statusHistory,
+  });
+});
+
+// Evidence Audit Log Entries
+casesRouter.get('/:id/evidence/:fileId/audit', (req: AuthenticatedRequest, res: Response) => {
+  const { fileId } = req.params;
+  const history = db.getEvidenceAuditHistory(fileId);
+  res.json({ fileId, auditHistory: history });
+});
+
+casesRouter.post(
+  '/:id/evidence/:fileId/audit',
+  requireAuth,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { fileId } = req.params;
+    const { action = 'VIEWED', notes } = req.body;
+    const user = req.user!;
+
+    db.addEvidenceAudit(fileId, {
+      action,
+      performedBy: user.fullName,
+      performedById: user.id,
+      role: user.role,
+      timestamp: new Date().toISOString(),
+      notes: notes || 'Accessed evidence file in secure vault.',
+    });
+
+    res.json({ success: true });
+  }
+);
+
