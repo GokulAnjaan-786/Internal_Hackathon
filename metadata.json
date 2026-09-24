@@ -1,0 +1,6 @@
+{
+  "name": "Missing Person Case Organiser",
+  "description": "Privacy-sensitive emergency platform for authorized teams to consolidate missing person cases, reports, sightings, verification workflows, and investigation coordination.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
